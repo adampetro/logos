@@ -428,6 +428,13 @@ impl<Leaf> Graph<Leaf> {
         &self.nodes
     }
 
+    pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(id, node)| node.as_ref().map(|_| NodeId::new(id)))
+    }
+
     /// Find all nodes that have no references and remove them.
     pub fn shake(&mut self, root: NodeId) {
         let mut filter = vec![false; self.nodes.len()];

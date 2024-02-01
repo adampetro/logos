@@ -13,12 +13,13 @@ mod generator;
 mod graph;
 mod leaf;
 mod mir;
+mod new_generator;
 mod parser;
 mod util;
 
-use generator::Generator;
 use graph::{DisambiguationError, Fork, Graph, Rope};
 use leaf::Leaf;
+use new_generator::Generator;
 use parser::{IgnoreFlags, Mode, Parser};
 use quote::ToTokens;
 use util::MaybeVoid;
@@ -73,34 +74,35 @@ pub fn generate(input: TokenStream) -> TokenStream {
     }
 
     for variant in &mut item.variants {
-        let field = match &mut variant.fields {
-            Fields::Unit => MaybeVoid::Void,
-            Fields::Unnamed(fields) => {
-                if fields.unnamed.len() != 1 {
-                    parser.err(
-                        format!(
-                            "Logos currently only supports variants with one field, found {}",
-                            fields.unnamed.len(),
-                        ),
-                        fields.span(),
-                    );
+        let field =
+            match &mut variant.fields {
+                Fields::Unit => MaybeVoid::Void,
+                Fields::Unnamed(fields) => {
+                    if fields.unnamed.len() != 1 {
+                        parser.err(
+                            format!(
+                                "Logos currently only supports variants with one field, found {}",
+                                fields.unnamed.len(),
+                            ),
+                            fields.span(),
+                        );
+                    }
+
+                    let ty = &mut fields
+                        .unnamed
+                        .first_mut()
+                        .expect("Already checked len; qed")
+                        .ty;
+                    let ty = parser.get_type(ty);
+
+                    MaybeVoid::Some(ty)
                 }
+                Fields::Named(fields) => {
+                    parser.err("Logos doesn't support named fields yet.", fields.span());
 
-                let ty = &mut fields
-                    .unnamed
-                    .first_mut()
-                    .expect("Already checked len; qed")
-                    .ty;
-                let ty = parser.get_type(ty);
-
-                MaybeVoid::Some(ty)
-            }
-            Fields::Named(fields) => {
-                parser.err("Logos doesn't support named fields yet.", fields.span());
-
-                MaybeVoid::Void
-            }
-        };
+                    MaybeVoid::Void
+                }
+            };
 
         // Lazy leaf constructor to avoid cloning
         let var_ident = &variant.ident;
@@ -218,21 +220,22 @@ pub fn generate(input: TokenStream) -> TokenStream {
     let generics = parser.generics();
     let this = quote!(#name #generics);
 
-    let impl_logos = |body| {
-        quote! {
-            impl<'s> #logos_path::Logos<'s> for #this {
-                type Error = #error_type;
+    let impl_logos =
+        |body| {
+            quote! {
+                impl<'s> #logos_path::Logos<'s> for #this {
+                    type Error = #error_type;
 
-                type Extras = #extras;
+                    type Extras = #extras;
 
-                type Source = #source;
+                    type Source = #source;
 
-                fn lex(lex: &mut #logos_path::Lexer<'s, Self>) {
-                    #body
+                    fn lex(lex: &mut #logos_path::Lexer<'s, Self>) {
+                        #body
+                    }
                 }
             }
-        }
-    };
+        };
 
     for id in regex_ids {
         let fork = graph.fork_off(id);
@@ -291,15 +294,15 @@ pub fn generate(input: TokenStream) -> TokenStream {
 
         type Lexer<'s> = #logos_path::Lexer<'s, #this>;
 
-        fn _end<'s>(lex: &mut Lexer<'s>) {
-            lex.end()
-        }
+        // fn _end<'s>(lex: &mut Lexer<'s>) {
+        //     lex.end()
+        // }
 
-        fn _error<'s>(lex: &mut Lexer<'s>) {
-            lex.bump_unchecked(1);
+        // fn _error<'s>(lex: &mut Lexer<'s>) {
+        //     lex.bump_unchecked(1);
 
-            lex.error();
-        }
+        //     lex.error();
+        // }
 
         #body
     })

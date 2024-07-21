@@ -1,0 +1,23 @@
+[lib]
+bench = false
+
+[package]
+name = "logos-core"
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[package.metadata.release]
+shared-version = true
+
+[dependencies]
+itertools = "0.13"
+enum-as-inner = "0.6"

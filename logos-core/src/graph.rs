@@ -12,7 +12,7 @@ use std::{
 use crate::{Lexer, Specification, Variant};
 use arena::Arena;
 pub(crate) use arena::NodeId;
-use fork::Fork;
+use fork::{Fork, LOOKUP_TABLE_SIZE};
 pub(crate) use node::Node;
 use rope::Rope;
 use variant_match::VariantMatch;
@@ -30,7 +30,7 @@ impl Graph {
         let mut instance = Self {
             nodes: Arena::default(),
         };
-        let mut start_fork = Fork::default();
+        let mut start_fork = Fork::new(None, None);
 
         // sort variants by decreasing priority
         let mut variants = lexer.variants().iter().collect::<Vec<_>>();
@@ -66,12 +66,12 @@ impl Graph {
             priority: variant.priority(),
         });
 
-        let node = self.node_for_specification(variant.specification(), terminal, None);
+        let node = self.node_for_specification(variant.specification(), terminal, None, None);
 
         match node {
             Node::Fork(fork) => fork,
             Node::Rope(rope) => {
-                let mut fork = Fork::default().with_miss(rope.miss);
+                let mut fork = Fork::new(None, None);
                 let f = rope.fork_off(self);
                 fork.merge(f, self);
                 fork
@@ -85,46 +85,70 @@ impl Graph {
         specification: &Specification,
         then: NodeId,
         miss: Option<NodeId>,
+        record_miss_backtrack_idx: Option<NodeId>,
     ) -> Node {
         match specification {
             Specification::Byte(value) => Rope {
                 pattern: vec![HashSet::from([*value])],
                 then,
                 miss,
+                record_miss_backtrack_idx,
             }
             .into(),
-            Specification::Any(any) => Fork::try_from_any(any, then, miss)
-                .map(Node::from)
-                .unwrap_or_else(|| {
-                    let mut fork = Fork::default().with_miss(miss);
+            Specification::Any(any) => {
+                Fork::try_from_any(any, then, miss, record_miss_backtrack_idx)
+                    .map(Node::from)
+                    .unwrap_or_else(|| {
+                        let mut fork = Fork::new(miss, record_miss_backtrack_idx);
 
-                    any.iter().for_each(|specification| {
-                        let node = self.node_for_specification(specification, then, miss);
-                        match node {
-                            Node::Fork(f) => fork.merge(f, self),
-                            Node::Rope(rope) => {
-                                let f = rope.fork_off(self);
-                                fork.merge(f, self);
+                        any.iter().for_each(|specification| {
+                            let node = self.node_for_specification(specification, then, miss, None);
+                            match node {
+                                Node::Fork(f) => fork.merge(f, self),
+                                Node::Rope(rope) => {
+                                    let f = rope.fork_off(self);
+                                    fork.merge(f, self);
+                                }
+                                Node::VariantMatch(_) => {
+                                    unreachable!("variant match implies an empty specification")
+                                }
                             }
-                            Node::VariantMatch(_) => {
-                                unreachable!("variant match implies an empty specification")
-                            }
-                        }
-                    });
+                        });
 
-                    fork.into()
-                }),
-            Specification::Sequence(sequence) => Rope::try_from_sequence(sequence, then, miss)
-                .map(Node::from)
-                .unwrap_or_else(|| {
-                    let mut reverse_iterator = sequence.iter().rev();
-                    let then_node =
-                        self.node_for_specification(reverse_iterator.next().unwrap(), then, miss);
-                    reverse_iterator.fold(then_node, |then_node, specification| {
-                        let then = self.insert(then_node);
-                        self.node_for_specification(specification, then, miss)
+                        fork.into()
                     })
-                }),
+            }
+            Specification::Sequence(sequence) => {
+                Rope::try_from_sequence(sequence, then, miss, record_miss_backtrack_idx)
+                    .map(Node::from)
+                    .unwrap_or_else(|| {
+                        let sequence_length = sequence.len();
+                        let mut reverse_iterator =
+                            sequence
+                                .iter()
+                                .rev()
+                                .enumerate()
+                                .map(|(idx, specification)| {
+                                    ((idx + 1 == sequence_length), specification)
+                                });
+                        let (is_last, specification) = reverse_iterator.next().unwrap();
+                        let then_node = self.node_for_specification(
+                            specification,
+                            then,
+                            miss,
+                            is_last.then_some(record_miss_backtrack_idx).flatten(),
+                        );
+                        reverse_iterator.fold(then_node, |then_node, (is_last, specification)| {
+                            let then = self.insert(then_node);
+                            self.node_for_specification(
+                                specification,
+                                then,
+                                miss,
+                                is_last.then_some(record_miss_backtrack_idx).flatten(),
+                            )
+                        })
+                    })
+            }
             Specification::Loop(l) => {
                 if let Some(max) = l.max() {
                     let terminal = then;
@@ -132,35 +156,61 @@ impl Graph {
 
                     let last_miss = if min == max { miss } else { Some(terminal) };
 
-                    let then_node =
-                        self.node_for_specification(l.specification(), terminal, last_miss);
+                    let then_node = self.node_for_specification(
+                        l.specification(),
+                        terminal,
+                        last_miss,
+                        (min == max).then_some(terminal),
+                    );
 
                     let then_node = (min..(max - 1)).fold(then_node, |then_node, _| {
                         let then = self.insert(then_node);
-                        self.node_for_specification(l.specification(), then, Some(terminal))
+                        self.node_for_specification(
+                            l.specification(),
+                            then,
+                            Some(terminal),
+                            Some(terminal),
+                        )
                     });
 
-                    (0..min).fold(then_node, |then_node, _| {
+                    (0..min).fold(then_node, |then_node, i| {
                         let then = self.insert(then_node);
-                        self.node_for_specification(l.specification(), then, miss)
+                        let is_last = i + 1 == min;
+                        self.node_for_specification(
+                            l.specification(),
+                            then,
+                            miss,
+                            is_last.then_some(record_miss_backtrack_idx).flatten(),
+                        )
                     })
                 } else {
                     let reserved_loop_back_to = self.reserve();
 
-                    let loop_start = self.node_for_specification(
+                    let loop_end = self.node_for_specification(
                         l.specification(),
                         reserved_loop_back_to.0,
                         Some(then),
+                        Some(then),
                     );
 
-                    let start_id = self.insert_reserved(reserved_loop_back_to, loop_start);
+                    let start_id = self.insert_reserved(reserved_loop_back_to, loop_end);
 
-                    let then_node =
-                        self.node_for_specification(l.specification(), start_id, Some(then));
+                    let then_node = self.node_for_specification(
+                        l.specification(),
+                        start_id,
+                        Some(then),
+                        Some(then),
+                    );
 
-                    (0..l.min()).fold(then_node, |then_node, _| {
+                    (0..l.min()).fold(then_node, |then_node, i| {
                         let then = self.insert(then_node);
-                        self.node_for_specification(l.specification(), then, miss)
+                        let is_last = i + 1 == l.min();
+                        self.node_for_specification(
+                            l.specification(),
+                            then,
+                            miss,
+                            is_last.then_some(record_miss_backtrack_idx).flatten(),
+                        )
                     })
                 }
             }
@@ -191,12 +241,18 @@ impl Graph {
                 if let Some(miss) = fork.miss {
                     self.visit_node(miss, seen_nodes);
                 }
+                if let Some(record_miss_backtrack_idx) = fork.record_miss_backtrack_idx {
+                    self.visit_node(record_miss_backtrack_idx, seen_nodes);
+                }
             }
             Node::VariantMatch(_) => {}
             Node::Rope(rope) => {
                 self.visit_node(rope.then, seen_nodes);
                 if let Some(miss) = rope.miss {
                     self.visit_node(miss, seen_nodes);
+                }
+                if let Some(record_miss_backtrack_idx) = rope.record_miss_backtrack_idx {
+                    self.visit_node(record_miss_backtrack_idx, seen_nodes);
                 }
             }
         }
@@ -211,11 +267,21 @@ impl Graph {
             // the to node is always higher
             (_, Some(Node::VariantMatch(_))) => to_id,
             (Some(Node::VariantMatch(_)), Some(Node::Fork(_))) => {
-                self[to_id].as_fork_mut().unwrap().miss = Some(from_id);
+                self.propagate_miss(to_id, from_id, &mut Default::default());
+                self[to_id]
+                    .as_fork_mut()
+                    .unwrap()
+                    .record_miss_backtrack_idx
+                    .get_or_insert(from_id);
                 to_id
             }
             (Some(Node::VariantMatch(_)), Some(Node::Rope(_))) => {
-                self[to_id].as_rope_mut().unwrap().miss = Some(from_id);
+                self.propagate_miss(to_id, from_id, &mut Default::default());
+                self[to_id]
+                    .as_rope_mut()
+                    .unwrap()
+                    .record_miss_backtrack_idx
+                    .get_or_insert(from_id);
                 to_id
             }
             _ => todo!(),
@@ -224,6 +290,78 @@ impl Graph {
 
     fn reserve(&mut self) -> ReservedId {
         ReservedId(self.nodes.insert(None))
+    }
+
+    fn propagate_miss(&mut self, node_id: NodeId, miss: NodeId, visited: &mut HashSet<NodeId>) {
+        if !visited.insert(node_id) {
+            return;
+        }
+
+        match &self[node_id] {
+            Node::Fork(_) => {
+                if self[node_id].as_fork().unwrap().miss.is_none() {
+                    self[node_id].as_fork_mut().unwrap().miss = Some(miss);
+                    (0..LOOKUP_TABLE_SIZE).for_each(|idx| {
+                        if let Some(lookup_node_id) =
+                            self[node_id].as_fork().unwrap().lookup_table[idx]
+                        {
+                            self.propagate_miss(lookup_node_id, miss, visited);
+                            if let Some(fork_miss) = self[node_id].as_fork().unwrap().miss {
+                                if self.loops_to_target(
+                                    lookup_node_id,
+                                    node_id,
+                                    &mut Default::default(),
+                                ) {
+                                    self.propagate_miss(fork_miss, miss, visited);
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            Node::VariantMatch(_) => {}
+            Node::Rope(_) => {
+                if self[node_id].as_rope().unwrap().miss.is_none() {
+                    self[node_id].as_rope_mut().unwrap().miss = Some(miss);
+                    self.propagate_miss(self[node_id].as_rope().unwrap().then, miss, visited);
+                }
+
+                if let Some(rope_miss) = self[node_id].as_rope().unwrap().miss {
+                    if self.loops_to_target(
+                        node_id,
+                        self[node_id].as_rope().unwrap().then,
+                        &mut Default::default(),
+                    ) {
+                        self.propagate_miss(rope_miss, miss, visited);
+                    }
+                }
+            }
+        }
+    }
+
+    fn loops_to_target(
+        &self,
+        node_id: NodeId,
+        target: NodeId,
+        visited: &mut HashSet<NodeId>,
+    ) -> bool {
+        if node_id == target {
+            return true;
+        }
+
+        if !visited.insert(node_id) {
+            return false;
+        }
+
+        match &self[node_id] {
+            Node::Fork(fork) => fork.lookup_table.iter().any(|node_id| {
+                node_id.map_or(false, |node_id| {
+                    self.loops_to_target(node_id, target, visited)
+                })
+            }),
+            Node::VariantMatch(_) => false,
+            Node::Rope(rope) => self.loops_to_target(rope.then, target, visited),
+        }
     }
 }
 

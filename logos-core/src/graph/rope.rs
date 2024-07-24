@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use crate::graph::arena::HasNodeIds;
-use crate::graph::{Fork, Graph, Node, NodeId};
+use crate::graph::{Fork, Graph, NodeId};
 use crate::specification::{Sequence, Specification};
 
 #[derive(Debug)]
@@ -10,6 +10,7 @@ pub(crate) struct Rope {
     pub(crate) pattern: Vec<HashSet<u8>>,
     pub(crate) then: NodeId,
     pub(crate) miss: Option<NodeId>,
+    pub(crate) record_miss_backtrack_idx: Option<NodeId>,
 }
 
 impl Rope {
@@ -17,6 +18,7 @@ impl Rope {
         sequence: &Sequence,
         then: NodeId,
         miss: Option<NodeId>,
+        record_miss_backtrack_idx: Option<NodeId>,
     ) -> Option<Self> {
         sequence
             .iter()
@@ -33,6 +35,7 @@ impl Rope {
                 pattern,
                 miss,
                 then,
+                record_miss_backtrack_idx,
             })
     }
 
@@ -41,6 +44,7 @@ impl Rope {
             mut pattern,
             then,
             miss,
+            record_miss_backtrack_idx,
         } = self;
 
         let first = pattern.remove(0);
@@ -52,10 +56,11 @@ impl Rope {
                 pattern,
                 then,
                 miss,
+                record_miss_backtrack_idx: None,
             })
         };
 
-        let mut fork = Fork::default().with_miss(miss);
+        let mut fork = Fork::new(miss, record_miss_backtrack_idx);
 
         first.iter().for_each(|byte| {
             fork.lookup_table[*byte as usize] = Some(then);
@@ -71,6 +76,10 @@ impl HasNodeIds for Rope {
 
         if let Some(miss) = &mut self.miss {
             f(miss);
+        }
+
+        if let Some(record_miss_backtrack_idx) = &mut self.record_miss_backtrack_idx {
+            f(record_miss_backtrack_idx);
         }
     }
 }

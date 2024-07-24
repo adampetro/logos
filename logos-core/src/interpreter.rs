@@ -4,6 +4,7 @@ use crate::{
     graph::{Graph, Node, NodeId},
     Lexer,
 };
+use std::collections::HashMap;
 pub use token::Token;
 
 #[derive(Debug)]
@@ -12,6 +13,7 @@ pub struct Interpreter<'a> {
     start_node_id: NodeId,
     bytes: &'a [u8],
     current_idx: usize,
+    backtrack_idxs: HashMap<NodeId, usize>,
 }
 
 impl<'a> Interpreter<'a> {
@@ -22,6 +24,7 @@ impl<'a> Interpreter<'a> {
             start_node_id,
             bytes,
             current_idx: 0,
+            backtrack_idxs: HashMap::new(),
         }
     }
 }
@@ -42,6 +45,10 @@ impl<'a> Iterator for Interpreter<'a> {
             dbg!(idx, current_node_id);
             match current_node {
                 Node::Fork(fork) => {
+                    if let Some(backtrack_idx) = fork.record_miss_backtrack_idx {
+                        self.backtrack_idxs.insert(backtrack_idx, idx);
+                    }
+
                     match self
                         .bytes
                         .get(idx)
@@ -54,9 +61,10 @@ impl<'a> Iterator for Interpreter<'a> {
                         }
                         None => {
                             if let Some(miss) = fork.miss {
-                                dbg!("miss, going to {}", miss);
+                                dbg!(miss);
                                 current_node_id = miss;
                                 current_node = &self.graph[miss];
+                                idx = self.backtrack_idxs[&miss];
                             } else {
                                 break;
                             }
@@ -72,6 +80,10 @@ impl<'a> Iterator for Interpreter<'a> {
                     return Some(Ok(token));
                 }
                 Node::Rope(rope) => {
+                    if let Some(backtrack_idx) = rope.record_miss_backtrack_idx {
+                        self.backtrack_idxs.insert(backtrack_idx, idx);
+                    }
+
                     let matches_pattern =
                         rope.pattern.iter().enumerate().all(|(i, byte_pattern)| {
                             idx + i < self.bytes.len()
@@ -83,17 +95,18 @@ impl<'a> Iterator for Interpreter<'a> {
                         current_node = &self.graph[rope.then];
                         idx += rope.pattern.len();
                     } else if let Some(miss) = rope.miss {
-                        dbg!("miss, going to {}", miss);
+                        dbg!(miss);
                         current_node_id = miss;
                         current_node = &self.graph[miss];
+                        idx = self.backtrack_idxs[&miss];
                     } else {
-                        return Some(Err(()));
+                        break;
                     }
                 }
             }
         }
 
-        println!("Encountered error, idx: {}", idx);
+        self.current_idx += 1;
 
         Some(Err(()))
     }

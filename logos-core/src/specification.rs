@@ -37,6 +37,16 @@ impl Specification {
         Self::Any(Any::new((b'0'..=b'9').map(Self::Byte).collect()))
     }
 
+    pub fn ascii_hex_digit() -> Self {
+        Self::Any(Any::new(
+            (b'0'..=b'9')
+                .chain(b'a'..=b'f')
+                .chain(b'A'..=b'F')
+                .map(Self::Byte)
+                .collect(),
+        ))
+    }
+
     pub fn new_str_sequence(s: &str) -> Self {
         Self::Sequence(Sequence::new_str_sequence(s))
     }
@@ -55,6 +65,21 @@ impl Specification {
 
     pub fn maybe(specification: Self) -> Self {
         Self::Loop(Loop::new(0, Some(1), specification))
+    }
+
+    pub fn new_not(bytes_disallowed: &[u8]) -> Self {
+        let mut bytes_allowed = [true; 256];
+        bytes_disallowed.iter().for_each(|&byte| {
+            bytes_allowed[byte as usize] = false;
+        });
+        Self::new_any(
+            bytes_allowed
+                .iter()
+                .enumerate()
+                .filter(|(_, &allowed)| allowed)
+                .map(|(byte, _)| Specification::Byte(byte as u8))
+                .collect(),
+        )
     }
 
     pub(crate) fn can_overlap(&self, other: &Self) -> bool {

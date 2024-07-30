@@ -1,11 +1,12 @@
 use std::fmt::Debug;
 
 use crate::graph::arena::HasNodeIds;
-use crate::graph::{Graph, NodeId};
+use crate::graph::{Graph, Node, NodeId};
 use crate::specification::Any;
 
 pub(crate) const LOOKUP_TABLE_SIZE: usize = 256;
 
+#[derive(Clone)]
 pub(crate) struct Fork {
     pub(crate) lookup_table: Box<[Option<NodeId>; LOOKUP_TABLE_SIZE]>,
     pub(crate) miss: Option<NodeId>,
@@ -55,13 +56,28 @@ impl Fork {
             self.lookup_table[idx] = new_to;
         });
         if let Some(miss) = other.miss {
-            self.miss.get_or_insert(miss);
-            let mut visited = Default::default();
-            (0..LOOKUP_TABLE_SIZE).for_each(|node_id| {
-                if let Some(node_id) = self.lookup_table[node_id] {
-                    graph.propagate_miss(node_id, miss, &mut visited);
+            if self.miss.is_none() {
+                match &graph[miss] {
+                    Node::Fork(fork) => {
+                        let fork = fork.clone();
+                        self.merge(fork, graph);
+                    }
+                    Node::Rope(rope) => {
+                        let rope = rope.clone();
+                        let fork = rope.fork_off(graph);
+                        self.merge(fork, graph);
+                    }
+                    Node::VariantMatch(_) => {
+                        self.miss = Some(miss);
+                        let mut visited = Default::default();
+                        (0..LOOKUP_TABLE_SIZE).for_each(|node_id| {
+                            if let Some(node_id) = self.lookup_table[node_id] {
+                                graph.propagate_miss(node_id, miss, &mut visited);
+                            }
+                        });
+                    }
                 }
-            });
+            }
         }
         if let Some(record_miss_backtrack_idx) = other.record_miss_backtrack_idx {
             self.record_miss_backtrack_idx

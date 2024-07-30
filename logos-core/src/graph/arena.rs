@@ -79,8 +79,7 @@ impl<T> Arena<T> {
 
 impl<T: Debug> Debug for Arena<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let nodes = self.iter().collect::<Vec<_>>();
-        f.debug_struct("Arena").field("nodes", &nodes).finish()
+        f.debug_map().entries(self.iter()).finish()
     }
 }
 

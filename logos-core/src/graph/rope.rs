@@ -5,7 +5,7 @@ use crate::graph::arena::HasNodeIds;
 use crate::graph::{Fork, Graph, NodeId};
 use crate::specification::{Sequence, Specification};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Rope {
     pub(crate) pattern: Vec<HashSet<u8>>,
     pub(crate) then: NodeId,

@@ -160,7 +160,7 @@ impl Graph {
                         l.specification(),
                         terminal,
                         last_miss,
-                        (min == max).then_some(terminal),
+                        (min != max).then_some(terminal),
                     );
 
                     let then_node = (min..(max - 1)).fold(then_node, |then_node, _| {
@@ -284,7 +284,20 @@ impl Graph {
                     .get_or_insert(from_id);
                 to_id
             }
-            _ => todo!(),
+            (Some(Node::Rope(from_rope)), Some(Node::Rope(to_rope))) => {
+                let from_rope = from_rope.clone();
+                let to_rope = to_rope.clone();
+                let from_fork = from_rope.fork_off(self);
+                let mut to_fork = to_rope.fork_off(self);
+
+                to_fork.merge(from_fork, self);
+
+                self.insert(to_fork)
+            }
+            (a, b) => {
+                dbg!(a, b);
+                todo!()
+            }
         }
     }
 

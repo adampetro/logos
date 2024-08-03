@@ -1,0 +1,22 @@
+[package]
+name = "logos-codegen-next"
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+logos-core = { version = "0.14.0", path = "../logos-core" }
+syn = { version = "2.0.13", features = ["full"] }
+proc-macro2 = "1.0.9"
+quote = "1.0.3"

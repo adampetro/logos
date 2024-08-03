@@ -1,5 +1,5 @@
 [workspace]
-members = ["logos-cli", "logos-codegen", "logos-core", "logos-derive", "tests"]
+members = ["logos-cli", "logos-codegen", "logos-codegen-next", "logos-core", "logos-derive", "logos-next", "tests"]
 resolver = "2"
 
 [workspace.package]

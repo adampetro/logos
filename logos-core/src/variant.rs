@@ -1,13 +1,13 @@
 use crate::Specification;
 
-pub struct Variant {
-    name: String,
+pub struct Variant<T> {
+    name: T,
     priority: usize,
     specification: Specification,
 }
 
-impl Variant {
-    pub fn new(name: String, specification: Specification, priority: Option<usize>) -> Self {
+impl<T> Variant<T> {
+    pub fn new(name: T, specification: Specification, priority: Option<usize>) -> Self {
         Self {
             name,
             priority: priority.unwrap_or_else(|| specification.default_priority()),
@@ -15,7 +15,7 @@ impl Variant {
         }
     }
 
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &T {
         &self.name
     }
 

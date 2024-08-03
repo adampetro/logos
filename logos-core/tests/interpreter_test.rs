@@ -6,19 +6,19 @@ use logos_core::{
 #[test]
 fn test_interpreter() {
     let lexer = Lexer::new(vec![
-        Variant::new("a".to_string(), Specification::Byte(b'a'), None),
-        Variant::new("b".to_string(), Specification::Byte(b'b'), None),
-        Variant::new("c".to_string(), Specification::Byte(b'c'), None),
-        Variant::new("d".to_string(), Specification::Byte(b'd'), None),
-        Variant::new("e".to_string(), Specification::Byte(b'e'), None),
-        Variant::new("f".to_string(), Specification::Byte(b'f'), None),
+        Variant::new("a", Specification::Byte(b'a'), None),
+        Variant::new("b", Specification::Byte(b'b'), None),
+        Variant::new("c", Specification::Byte(b'c'), None),
+        Variant::new("d", Specification::Byte(b'd'), None),
+        Variant::new("e", Specification::Byte(b'e'), None),
+        Variant::new("f", Specification::Byte(b'f'), None),
         Variant::new(
-            "def".to_string(),
+            "def",
             Specification::new_loop(3, None, Specification::new_str_sequence("def")),
             None,
         ),
         Variant::new(
-            "number".to_string(),
+            "number",
             Specification::new_sequence(vec![
                 Specification::new_any(vec![
                     Specification::Byte(b'0'),
@@ -48,18 +48,18 @@ fn test_interpreter() {
     dbg!(&interpreter);
 
     assert_eq!(
-        interpreter.collect::<Result<Vec<Token>, ()>>(),
+        interpreter.collect::<Result<Vec<Token<&'static str>>, ()>>(),
         Ok(vec![
-            Token::new("a".to_string(), b"a"),
-            Token::new("b".to_string(), b"b"),
-            Token::new("c".to_string(), b"c"),
-            Token::new("d".to_string(), b"d"),
-            Token::new("e".to_string(), b"e"),
-            Token::new("f".to_string(), b"f"),
-            Token::new("d".to_string(), b"d"),
-            Token::new("e".to_string(), b"e"),
-            Token::new("f".to_string(), b"f"),
-            Token::new("number".to_string(), b"1234.567"),
+            Token::new("a", b"a"),
+            Token::new("b", b"b"),
+            Token::new("c", b"c"),
+            Token::new("d", b"d"),
+            Token::new("e", b"e"),
+            Token::new("f", b"f"),
+            Token::new("d", b"d"),
+            Token::new("e", b"e"),
+            Token::new("f", b"f"),
+            Token::new("number", b"1234.567"),
         ])
     );
 }
@@ -68,7 +68,7 @@ fn test_interpreter() {
 fn test_logos_bug() {
     let lexer = Lexer::new(vec![
         Variant::new(
-            "composite".to_string(),
+            "composite",
             Specification::new_sequence(vec![
                 Specification::new_loop(
                     1,
@@ -82,9 +82,9 @@ fn test_logos_bug() {
             ]),
             None,
         ),
-        Variant::new("d".to_string(), Specification::Byte(b'd'), None),
-        Variant::new("e".to_string(), Specification::Byte(b'e'), None),
-        Variant::new("f".to_string(), Specification::Byte(b'f'), None),
+        Variant::new("d", Specification::Byte(b'd'), None),
+        Variant::new("e", Specification::Byte(b'e'), None),
+        Variant::new("f", Specification::Byte(b'f'), None),
     ])
     .unwrap();
 
@@ -93,14 +93,14 @@ fn test_logos_bug() {
     dbg!(&interpreter);
 
     assert_eq!(
-        interpreter.collect::<Result<Vec<Token>, ()>>(),
+        interpreter.collect::<Result<Vec<Token<&'static str>>, ()>>(),
         Ok(vec![
-            Token::new("d".to_string(), b"d"),
-            Token::new("e".to_string(), b"e"),
-            Token::new("d".to_string(), b"d"),
-            Token::new("e".to_string(), b"e"),
-            Token::new("d".to_string(), b"d"),
-            Token::new("e".to_string(), b"e"),
+            Token::new("d", b"d"),
+            Token::new("e", b"e"),
+            Token::new("d", b"d"),
+            Token::new("e", b"e"),
+            Token::new("d", b"d"),
+            Token::new("e", b"e"),
         ]),
     );
 }
@@ -108,17 +108,9 @@ fn test_logos_bug() {
 #[test]
 fn test_similar_tokens() {
     let lexer = Lexer::new(vec![
-        Variant::new("a".to_string(), Specification::Byte(b'a'), None),
-        Variant::new(
-            "aa".to_string(),
-            Specification::new_str_sequence("aa"),
-            None,
-        ),
-        Variant::new(
-            "aaa".to_string(),
-            Specification::new_str_sequence("aaa"),
-            None,
-        ),
+        Variant::new("a", Specification::Byte(b'a'), None),
+        Variant::new("aa", Specification::new_str_sequence("aa"), None),
+        Variant::new("aaa", Specification::new_str_sequence("aaa"), None),
     ])
     .unwrap();
 
@@ -127,11 +119,8 @@ fn test_similar_tokens() {
     dbg!(&interpreter);
 
     assert_eq!(
-        interpreter.collect::<Result<Vec<Token>, ()>>(),
-        Ok(vec![
-            Token::new("aaa".to_string(), b"aaa"),
-            Token::new("a".to_string(), b"a"),
-        ]),
+        interpreter.collect::<Result<Vec<Token<&'static str>>, ()>>(),
+        Ok(vec![Token::new("aaa", b"aaa"), Token::new("a", b"a"),]),
     );
 }
 
@@ -139,26 +128,22 @@ fn test_similar_tokens() {
 fn test_json() {
     let lexer = Lexer::new(vec![
         Variant::new(
-            "boolean".to_string(),
+            "boolean",
             Specification::new_any(vec![
                 Specification::new_str_sequence("true"),
                 Specification::new_str_sequence("false"),
             ]),
             None,
         ),
-        Variant::new("open_brace".to_string(), Specification::Byte(b'{'), None),
-        Variant::new("close_brace".to_string(), Specification::Byte(b'}'), None),
-        Variant::new("open_bracket".to_string(), Specification::Byte(b'['), None),
-        Variant::new("close_bracket".to_string(), Specification::Byte(b']'), None),
-        Variant::new("colon".to_string(), Specification::Byte(b':'), None),
-        Variant::new("comma".to_string(), Specification::Byte(b','), None),
+        Variant::new("open_brace", Specification::Byte(b'{'), None),
+        Variant::new("close_brace", Specification::Byte(b'}'), None),
+        Variant::new("open_bracket", Specification::Byte(b'['), None),
+        Variant::new("close_bracket", Specification::Byte(b']'), None),
+        Variant::new("colon", Specification::Byte(b':'), None),
+        Variant::new("comma", Specification::Byte(b','), None),
+        Variant::new("null", Specification::new_str_sequence("null"), None),
         Variant::new(
-            "null".to_string(),
-            Specification::new_str_sequence("null"),
-            None,
-        ),
-        Variant::new(
-            "number".to_string(),
+            "number",
             Specification::new_sequence(vec![
                 Specification::new_loop(0, Some(1), Specification::Byte(b'-')),
                 Specification::new_any(vec![
@@ -201,7 +186,7 @@ fn test_json() {
             None,
         ),
         Variant::new(
-            "string".to_string(),
+            "string",
             Specification::new_sequence(vec![
                 Specification::Byte(b'"'),
                 Specification::new_loop(
@@ -237,7 +222,7 @@ fn test_json() {
             None,
         ),
         Variant::new(
-            "ignored".to_string(),
+            "ignored",
             Specification::new_loop(
                 1,
                 None,
@@ -258,19 +243,19 @@ fn test_json() {
     dbg!(&interpreter);
 
     assert_eq!(
-        interpreter.collect::<Result<Vec<Token>, ()>>(),
+        interpreter.collect::<Result<Vec<Token<&'static str>>, ()>>(),
         Ok(vec![
-            Token::new("boolean".to_string(), b"true"),
-            Token::new("boolean".to_string(), b"false"),
-            Token::new("open_brace".to_string(), b"{"),
-            Token::new("close_brace".to_string(), b"}"),
-            Token::new("open_bracket".to_string(), b"["),
-            Token::new("close_bracket".to_string(), b"]"),
-            Token::new("colon".to_string(), b":"),
-            Token::new("comma".to_string(), b","),
-            Token::new("null".to_string(), b"null"),
-            Token::new("number".to_string(), b"3.14159e0"),
-            Token::new("string".to_string(), b"\"string\""),
+            Token::new("boolean", b"true"),
+            Token::new("boolean", b"false"),
+            Token::new("open_brace", b"{"),
+            Token::new("close_brace", b"}"),
+            Token::new("open_bracket", b"["),
+            Token::new("close_bracket", b"]"),
+            Token::new("colon", b":"),
+            Token::new("comma", b","),
+            Token::new("null", b"null"),
+            Token::new("number", b"3.14159e0"),
+            Token::new("string", b"\"string\""),
         ]),
     );
 }

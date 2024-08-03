@@ -39,7 +39,7 @@ impl Rope {
             })
     }
 
-    pub(crate) fn fork_off(self, graph: &mut Graph) -> Fork {
+    pub(crate) fn fork_off<T: Clone>(self, graph: &mut Graph<T>) -> Fork {
         let Self {
             mut pattern,
             then,

@@ -21,12 +21,12 @@ use variant_match::VariantMatch;
 struct ReservedId(NodeId);
 
 #[derive(Debug)]
-pub(crate) struct Graph {
-    nodes: Arena<Option<Node>>,
+pub(crate) struct Graph<T> {
+    nodes: Arena<Option<Node<T>>>,
 }
 
-impl Graph {
-    pub(crate) fn for_lexer(lexer: &Lexer) -> (Self, NodeId) {
+impl<T: Clone> Graph<T> {
+    pub(crate) fn for_lexer(lexer: &Lexer<T>) -> (Self, NodeId) {
         let mut instance = Self {
             nodes: Arena::default(),
         };
@@ -48,11 +48,11 @@ impl Graph {
         (instance, start_node_id)
     }
 
-    fn insert(&mut self, node: impl Into<Node>) -> NodeId {
+    fn insert(&mut self, node: impl Into<Node<T>>) -> NodeId {
         self.nodes.insert(Some(node.into()))
     }
 
-    fn insert_reserved(&mut self, reserved_id: ReservedId, node: impl Into<Node>) -> NodeId {
+    fn insert_reserved(&mut self, reserved_id: ReservedId, node: impl Into<Node<T>>) -> NodeId {
         self.nodes[reserved_id.0] = Some(node.into());
 
         // TODO: handle deferred merges
@@ -60,7 +60,7 @@ impl Graph {
         reserved_id.0
     }
 
-    fn fork_for_variant(&mut self, variant: &Variant) -> Fork {
+    fn fork_for_variant(&mut self, variant: &Variant<T>) -> Fork {
         let terminal = self.insert(VariantMatch {
             variant_name: variant.name().to_owned(),
             priority: variant.priority(),
@@ -86,7 +86,7 @@ impl Graph {
         then: NodeId,
         miss: Option<NodeId>,
         record_miss_backtrack_idx: Option<NodeId>,
-    ) -> Node {
+    ) -> Node<T> {
         match specification {
             Specification::Byte(value) => Rope {
                 pattern: vec![HashSet::from([*value])],
@@ -295,7 +295,6 @@ impl Graph {
                 self.insert(to_fork)
             }
             (a, b) => {
-                dbg!(a, b);
                 todo!()
             }
         }
@@ -378,8 +377,8 @@ impl Graph {
     }
 }
 
-impl Index<NodeId> for Graph {
-    type Output = Node;
+impl<T> Index<NodeId> for Graph<T> {
+    type Output = Node<T>;
 
     fn index(&self, index: NodeId) -> &Self::Output {
         self.nodes[index]
@@ -388,7 +387,7 @@ impl Index<NodeId> for Graph {
     }
 }
 
-impl IndexMut<NodeId> for Graph {
+impl<T> IndexMut<NodeId> for Graph<T> {
     fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
         self.nodes[index]
             .as_mut()

@@ -1,12 +1,15 @@
 use crate::Variant;
 use itertools::Itertools;
 
-pub struct Lexer {
-    variants: Vec<Variant>,
+pub struct Lexer<T> {
+    variants: Vec<Variant<T>>,
 }
 
-impl Lexer {
-    pub fn new(variants: Vec<Variant>) -> Result<Self, InvalidLexerError> {
+impl<T> Lexer<T> {
+    pub fn new(variants: Vec<Variant<T>>) -> Result<Self, InvalidLexerError>
+    where
+        T: Eq + std::hash::Hash,
+    {
         if variants.is_empty() {
             return Err(InvalidLexerError::NoVariants);
         }
@@ -23,7 +26,7 @@ impl Lexer {
         Ok(Self { variants })
     }
 
-    pub(crate) fn variants(&self) -> &[Variant] {
+    pub(crate) fn variants(&self) -> &[Variant<T>] {
         &self.variants
     }
 }

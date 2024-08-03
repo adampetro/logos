@@ -8,16 +8,16 @@ use std::collections::HashMap;
 pub use token::Token;
 
 #[derive(Debug)]
-pub struct Interpreter<'a> {
-    graph: Graph,
+pub struct Interpreter<'a, T> {
+    graph: Graph<T>,
     start_node_id: NodeId,
     bytes: &'a [u8],
     current_idx: usize,
     backtrack_idxs: HashMap<NodeId, usize>,
 }
 
-impl<'a> Interpreter<'a> {
-    pub fn new(lexer: Lexer, bytes: &'a [u8]) -> Self {
+impl<'a, T: Clone> Interpreter<'a, T> {
+    pub fn new(lexer: Lexer<T>, bytes: &'a [u8]) -> Self {
         let (graph, start_node_id) = Graph::for_lexer(&lexer);
         Self {
             graph,
@@ -29,8 +29,8 @@ impl<'a> Interpreter<'a> {
     }
 }
 
-impl<'a> Iterator for Interpreter<'a> {
-    type Item = Result<Token<'a>, ()>;
+impl<'a, T: Clone> Iterator for Interpreter<'a, T> {
+    type Item = Result<Token<'a, T>, ()>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.current_idx >= self.bytes.len() {

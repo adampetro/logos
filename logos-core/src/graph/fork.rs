@@ -42,7 +42,7 @@ impl Fork {
             })
     }
 
-    pub(crate) fn merge(&mut self, other: Fork, graph: &mut Graph) {
+    pub(crate) fn merge<T: Clone>(&mut self, other: Fork, graph: &mut Graph<T>) {
         (0..LOOKUP_TABLE_SIZE).for_each(|idx| {
             let other_to = other.lookup_table[idx];
             let to = self.lookup_table[idx];

@@ -81,28 +81,6 @@ impl Specification {
                 .collect(),
         )
     }
-
-    pub(crate) fn can_overlap(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Byte(a), Self::Byte(b)) => a == b,
-            (Self::Sequence(sequence_a), Self::Sequence(sequence_b)) => sequence_a
-                .iter()
-                .zip(sequence_b.iter())
-                .all(|(a, b)| a.can_overlap(b)),
-            (Self::Any(a), b) | (b, Self::Any(a)) => a.iter().any(|a| a.can_overlap(b)),
-            (Self::Loop(a), Self::Loop(b)) => {
-                b.max().map_or(true, |b_max| a.min() <= b_max)
-                    && a.max().map_or(true, |a_max| b.min() <= a_max)
-                    && a.specification().can_overlap(b.specification())
-            }
-            (Self::Sequence(sequence), Self::Loop(l))
-            | (Self::Loop(l), Self::Sequence(sequence)) => {
-                l.min() <= sequence.len()
-                    && sequence.iter().all(|s| s.can_overlap(l.specification()))
-            }
-            _ => false,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -128,40 +106,5 @@ mod tests {
             Specification::new_loop(0, Some(1), Specification::new_str_sequence("bar")),
         ]);
         assert_eq!(specification.default_priority(), 6);
-    }
-
-    #[test]
-    fn test_can_overlap() {
-        let a = Specification::Byte(b'a');
-        let b = Specification::Byte(b'b');
-        assert!(!a.can_overlap(&b));
-
-        let a = Specification::Byte(b'a');
-        let b = Specification::Byte(b'a');
-        assert!(a.can_overlap(&b));
-
-        let a = Specification::new_str_sequence("foo");
-        let b = Specification::new_str_sequence("bar");
-        assert!(!a.can_overlap(&b));
-
-        let a = Specification::new_str_sequence("foo");
-        let b = Specification::new_str_sequence("foobar");
-        assert!(a.can_overlap(&b));
-
-        let a = Specification::new_str_sequence("foobar");
-        let b = Specification::new_str_sequence("foo");
-        assert!(a.can_overlap(&b));
-
-        let a = Specification::new_str_sequence("foo");
-        let b = Specification::new_str_sequence("foo");
-        assert!(a.can_overlap(&b));
-
-        let a = Specification::new_str_sequence("abc");
-        let b = Specification::new_loop(0, Some(1), Specification::ascii_alphabetic());
-        assert!(a.can_overlap(&b));
-
-        let a = Specification::new_str_sequence("foo");
-        let b = Specification::new_loop(0, Some(1), Specification::new_str_sequence("bar"));
-        assert!(!a.can_overlap(&b));
     }
 }

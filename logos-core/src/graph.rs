@@ -9,7 +9,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use crate::{Lexer, Specification, Variant};
+use crate::{Lexer, Specification};
 use arena::Arena;
 pub(crate) use arena::NodeId;
 use fork::{Fork, LOOKUP_TABLE_SIZE};
@@ -33,13 +33,27 @@ impl<T: Clone> Graph<T> {
         let mut start_fork = Fork::new(None, None);
 
         // sort variants by decreasing priority
-        let mut variants = lexer.variants().iter().collect::<Vec<_>>();
-        variants.sort_by_key(|variant| usize::MAX - variant.priority());
+        let mut variant_patterns: Vec<(&T, &Specification, usize)> = lexer
+            .variants()
+            .iter()
+            .flat_map(|variant| {
+                variant
+                    .specifications()
+                    .iter()
+                    .map(move |(specification, priority)| {
+                        (variant.name(), specification, *priority)
+                    })
+            })
+            .collect();
+        variant_patterns.sort_by_key(|(_, _, priority)| usize::MAX - priority);
 
-        variants.into_iter().for_each(|variant| {
-            let fork_for_variant = instance.fork_for_variant(variant);
-            start_fork.merge(fork_for_variant, &mut instance);
-        });
+        variant_patterns
+            .into_iter()
+            .for_each(|(name, specification, priority)| {
+                let fork_for_variant_pattern =
+                    instance.fork_for_variant_pattern(name, specification, priority);
+                start_fork.merge(fork_for_variant_pattern, &mut instance);
+            });
 
         let start_node_id = instance.insert(start_fork);
 
@@ -60,13 +74,18 @@ impl<T: Clone> Graph<T> {
         reserved_id.0
     }
 
-    fn fork_for_variant(&mut self, variant: &Variant<T>) -> Fork {
+    fn fork_for_variant_pattern(
+        &mut self,
+        name: &T,
+        specification: &Specification,
+        priority: usize,
+    ) -> Fork {
         let terminal = self.insert(VariantMatch {
-            variant_name: variant.name().to_owned(),
-            priority: variant.priority(),
+            variant_name: name.clone(),
+            priority,
         });
 
-        let node = self.node_for_specification(variant.specification(), terminal, None, None);
+        let node = self.node_for_specification(specification, terminal, None, None);
 
         match node {
             Node::Fork(fork) => fork,

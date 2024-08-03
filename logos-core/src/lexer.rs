@@ -16,13 +16,6 @@ impl<T> Lexer<T> {
         if !variants.iter().map(Variant::name).all_unique() {
             return Err(InvalidLexerError::NonUniqueVariantNames);
         }
-        if variants.iter().combinations(2).any(|pair| {
-            let a = pair[0];
-            let b = pair[1];
-            a.specification().can_overlap(b.specification()) && a.priority() == b.priority()
-        }) {
-            return Err(InvalidLexerError::NonUniqueVariantPriorities);
-        }
         Ok(Self { variants })
     }
 

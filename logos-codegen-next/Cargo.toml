@@ -20,3 +20,5 @@ logos-core = { version = "0.14.0", path = "../logos-core" }
 syn = { version = "2.0.13", features = ["full"] }
 proc-macro2 = "1.0.9"
 quote = "1.0.3"
+regex-syntax = "0.8.2"
+itertools = "0.13"

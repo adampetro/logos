@@ -1,6 +1,14 @@
+use logos_core::Graph;
 use proc_macro::TokenStream;
-use quote::ToTokens;
-use syn::{parse_macro_input, parse_quote};
+use quote::{quote, ToTokens};
+use syn::parse_macro_input;
+
+mod error;
+mod generator;
+mod parser;
+
+use generator::Generator;
+use parser::Parser;
 
 #[proc_macro_derive(Logos, attributes(logos, extras, error, end, token, regex))]
 pub fn logos(input: TokenStream) -> TokenStream {
@@ -8,16 +16,16 @@ pub fn logos(input: TokenStream) -> TokenStream {
 
     let name = &enum_definition.ident;
 
-    let result: syn::Result<syn::Item> = Ok(parse_quote! {
-        impl<'source> logos_next::Logos<'source> for #name {
-            fn lex(lexer: &mut logos_next::Lexer<'source, Self>) -> Option<Result<Self, ()>> {
-                None
-            }
+    let lexer = match Parser::parse(&enum_definition) {
+        Ok(lexer) => lexer,
+        Err(err) => {
+            return quote!(#(#err)*).into_token_stream().into();
         }
-    });
+    };
 
-    match result {
-        Ok(item) => item.into_token_stream().into(),
-        Err(err) => err.to_compile_error().into(),
-    }
+    let (graph, entrypoint) = Graph::for_lexer(&lexer);
+
+    Generator::generate(name, &graph, entrypoint)
+        .into_token_stream()
+        .into()
 }

@@ -2,7 +2,7 @@ use crate::graph::{arena::HasNodeIds, Fork, NodeId, Rope, VariantMatch};
 use enum_as_inner::EnumAsInner;
 
 #[derive(Debug, EnumAsInner)]
-pub(crate) enum Node<T> {
+pub enum Node<T> {
     Fork(Fork),
     VariantMatch(VariantMatch<T>),
     Rope(Rope),

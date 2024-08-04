@@ -6,7 +6,7 @@ use crate::graph::{Fork, Graph, NodeId};
 use crate::specification::{Sequence, Specification};
 
 #[derive(Debug, Clone)]
-pub(crate) struct Rope {
+pub struct Rope {
     pub(crate) pattern: Vec<HashSet<u8>>,
     pub(crate) then: NodeId,
     pub(crate) miss: Option<NodeId>,
@@ -67,6 +67,22 @@ impl Rope {
         });
 
         fork
+    }
+
+    pub fn pattern(&self) -> &[HashSet<u8>] {
+        &self.pattern
+    }
+
+    pub fn miss(&self) -> Option<NodeId> {
+        self.miss
+    }
+
+    pub fn then(&self) -> NodeId {
+        self.then
+    }
+
+    pub fn record_miss_backtrack_idx(&self) -> Option<NodeId> {
+        self.record_miss_backtrack_idx
     }
 }
 

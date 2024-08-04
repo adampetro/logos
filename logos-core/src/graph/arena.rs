@@ -1,9 +1,23 @@
 use itertools::Itertools;
-use std::fmt::Debug;
-use std::ops::{Index, IndexMut};
+use std::fmt::{Debug, Display};
+use std::ops::{Deref, Index, IndexMut};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct NodeId(usize);
+pub struct NodeId(usize);
+
+impl Deref for NodeId {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
 
 pub(crate) struct Arena<T>(Vec<T>);
 

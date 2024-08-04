@@ -4,6 +4,7 @@ mod lexer;
 mod specification;
 mod variant;
 
+pub use graph::{Fork, Graph, Node, NodeId, Rope, VariantMatch};
 pub use lexer::Lexer;
 pub use specification::Specification;
 pub use variant::Variant;

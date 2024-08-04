@@ -48,7 +48,11 @@ impl Specification {
     }
 
     pub fn new_str_sequence(s: &str) -> Self {
-        Self::Sequence(Sequence::new_str_sequence(s))
+        if let [byte] = s.as_bytes() {
+            Self::Byte(*byte)
+        } else {
+            Self::Sequence(Sequence::new_str_sequence(s))
+        }
     }
 
     pub fn new_sequence(specifications: Vec<Self>) -> Self {

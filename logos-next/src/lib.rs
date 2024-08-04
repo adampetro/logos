@@ -1,6 +1,8 @@
 mod lexer;
+mod source;
 
 pub use lexer::Lexer;
+pub use source::{Chunk, Source};
 
 pub use logos_codegen_next::Logos;
 

@@ -4,10 +4,10 @@ use crate::graph::arena::HasNodeIds;
 use crate::graph::{Graph, Node, NodeId};
 use crate::specification::Any;
 
-pub(crate) const LOOKUP_TABLE_SIZE: usize = 256;
+pub const LOOKUP_TABLE_SIZE: usize = 256;
 
 #[derive(Clone)]
-pub(crate) struct Fork {
+pub struct Fork {
     pub(crate) lookup_table: Box<[Option<NodeId>; LOOKUP_TABLE_SIZE]>,
     pub(crate) miss: Option<NodeId>,
     pub(crate) record_miss_backtrack_idx: Option<NodeId>,
@@ -83,6 +83,18 @@ impl Fork {
             self.record_miss_backtrack_idx
                 .get_or_insert(record_miss_backtrack_idx);
         }
+    }
+
+    pub fn lookup_table(&self) -> &[Option<NodeId>; 256] {
+        &self.lookup_table
+    }
+
+    pub fn miss(&self) -> Option<NodeId> {
+        self.miss
+    }
+
+    pub fn record_miss_backtrack_idx(&self) -> Option<NodeId> {
+        self.record_miss_backtrack_idx
     }
 }
 

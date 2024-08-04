@@ -14,6 +14,13 @@ impl<T> Variant<T> {
         }
     }
 
+    pub fn new_multi_specification(name: T, specifications: Vec<(Specification, usize)>) -> Self {
+        Self {
+            name,
+            specifications,
+        }
+    }
+
     pub(crate) fn name(&self) -> &T {
         &self.name
     }

@@ -11,22 +11,22 @@ use std::{
 
 use crate::{Lexer, Specification};
 use arena::Arena;
-pub(crate) use arena::NodeId;
-use fork::{Fork, LOOKUP_TABLE_SIZE};
-pub(crate) use node::Node;
-use rope::Rope;
-use variant_match::VariantMatch;
+pub use arena::NodeId;
+pub use fork::{Fork, LOOKUP_TABLE_SIZE};
+pub use node::Node;
+pub use rope::Rope;
+pub use variant_match::VariantMatch;
 
 #[derive(Debug)]
 struct ReservedId(NodeId);
 
 #[derive(Debug)]
-pub(crate) struct Graph<T> {
+pub struct Graph<T> {
     nodes: Arena<Option<Node<T>>>,
 }
 
 impl<T: Clone> Graph<T> {
-    pub(crate) fn for_lexer(lexer: &Lexer<T>) -> (Self, NodeId) {
+    pub fn for_lexer(lexer: &Lexer<T>) -> (Self, NodeId) {
         let mut instance = Self {
             nodes: Arena::default(),
         };
@@ -314,7 +314,7 @@ impl<T: Clone> Graph<T> {
                 self.insert(to_fork)
             }
             (a, b) => {
-                todo!()
+                todo!("Deferred merge not yet implemented")
             }
         }
     }
@@ -393,6 +393,12 @@ impl<T: Clone> Graph<T> {
             Node::VariantMatch(_) => false,
             Node::Rope(rope) => self.loops_to_target(rope.then, target, visited),
         }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node<T>)> {
+        self.nodes
+            .iter()
+            .map(|(id, node)| (id, node.as_ref().unwrap()))
     }
 }
 

@@ -28,5 +28,4 @@ impl<T> Lexer<T> {
 pub enum InvalidLexerError {
     NoVariants,
     NonUniqueVariantNames,
-    NonUniqueVariantPriorities,
 }

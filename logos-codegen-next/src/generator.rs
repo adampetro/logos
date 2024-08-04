@@ -1,3 +1,4 @@
+use indexmap::IndexSet;
 use itertools::Itertools;
 use logos_core::{Fork, Graph, Node, NodeId, Rope, VariantMatch};
 use quote::format_ident;
@@ -5,7 +6,7 @@ use syn::parse_quote;
 
 pub(crate) struct Generator<'a> {
     state_idents: Vec<syn::Ident>,
-    rope_lookups: Vec<[bool; 256]>,
+    rope_lookups: IndexSet<[bool; 256]>,
     graph: &'a Graph<&'a syn::Ident>,
     entrypoint: NodeId,
 }
@@ -21,7 +22,7 @@ impl<'a> Generator<'a> {
                 .iter()
                 .map(|(id, _)| format_ident!("Node{}", id.to_string()))
                 .collect(),
-            rope_lookups: Vec::new(),
+            rope_lookups: IndexSet::new(),
             graph,
             entrypoint,
         };
@@ -196,21 +197,23 @@ impl<'a> Generator<'a> {
             }
         } else {
             let rope_lookup_start = self.rope_lookups.len();
-            rope.pattern().iter().for_each(|pattern_for_idx| {
+            let rope_lookup_idxs = rope.pattern().iter().map(|pattern_for_idx| {
                 let mut lookup_table = [false; 256];
                 pattern_for_idx.iter().for_each(|byte| {
                     lookup_table[*byte as usize] = true;
                 });
 
-                self.rope_lookups.push(lookup_table);
+                let (idx, _is_newly_inserted) = self.rope_lookups.insert_full(lookup_table);
+                idx
             });
 
-            let byte_checks = (0..length)
-                .map(|idx| {
-                    let outer_idx = (rope_lookup_start + idx) / 8;
-                    let inner_idx = (rope_lookup_start + idx) % 8;
+            let byte_checks = rope_lookup_idxs
+                .enumerate()
+                .map(|(bytes_idx, rope_lookup_idx)| {
+                    let outer_idx = rope_lookup_idx / 8;
+                    let inner_idx = rope_lookup_idx % 8;
                     parse_quote! {
-                        (ROPE_LOOKUPS[#outer_idx][bytes[#idx] as usize] & (1 << #inner_idx) != 0)
+                        (ROPE_LOOKUPS[#outer_idx][bytes[#bytes_idx] as usize] & (1 << #inner_idx) != 0)
                     }
                 })
                 .collect::<Vec<syn::Expr>>();
@@ -284,10 +287,12 @@ impl<'a> Generator<'a> {
     fn generate_rope_lookups(&self) -> syn::ItemConst {
         let lookups =
             self.rope_lookups
+                .iter()
                 .chunks(8)
+                .into_iter()
                 .map(|chunk| {
                     let mut lookup_table = [0u8; 256];
-                    chunk.iter().enumerate().for_each(|(i, lookup)| {
+                    chunk.enumerate().for_each(|(i, lookup)| {
                         lookup_table.iter_mut().zip_eq(lookup.iter()).for_each(
                             |(to_update, value)| {
                                 *to_update |= (*value as u8) << i;

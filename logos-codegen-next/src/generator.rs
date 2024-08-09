@@ -196,7 +196,6 @@ impl<'a> Generator<'a> {
                 }
             }
         } else {
-            let rope_lookup_start = self.rope_lookups.len();
             let rope_lookup_idxs = rope.pattern().iter().map(|pattern_for_idx| {
                 let mut lookup_table = [false; 256];
                 pattern_for_idx.iter().for_each(|byte| {

@@ -13,6 +13,9 @@ enum Token {
 
     #[regex("[abc][def][ghi]")]
     AbcDefGhi,
+
+    #[regex("[a-zA-Z]+")]
+    Text,
 }
 
 #[test]
@@ -28,4 +31,7 @@ fn test() {
 
     let mut lexer = Token::lexer("123");
     assert_eq!(lexer.next(), Some(Ok(Token::Number)));
+
+    let mut lexer = Token::lexer("abc");
+    assert_eq!(lexer.next(), Some(Ok(Token::Text)));
 }

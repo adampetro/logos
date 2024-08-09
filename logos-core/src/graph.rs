@@ -5,14 +5,14 @@ mod rope;
 mod variant_match;
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ops::{Index, IndexMut},
 };
 
 use crate::{Lexer, Specification};
 use arena::Arena;
 pub use arena::NodeId;
-pub use fork::{Fork, LOOKUP_TABLE_SIZE};
+pub use fork::Fork;
 pub use node::Node;
 pub use rope::Rope;
 pub use variant_match::VariantMatch;
@@ -285,23 +285,8 @@ impl<T: Clone> Graph<T> {
             // assume insert in inverse order of priority, so the priority of
             // the to node is always higher
             (_, Some(Node::VariantMatch(_))) => to_id,
-            (Some(Node::VariantMatch(_)), Some(Node::Fork(_))) => {
-                self.propagate_miss(to_id, from_id, &mut Default::default());
-                self[to_id]
-                    .as_fork_mut()
-                    .unwrap()
-                    .record_miss_backtrack_idx
-                    .get_or_insert(from_id);
-                to_id
-            }
-            (Some(Node::VariantMatch(_)), Some(Node::Rope(_))) => {
-                self.propagate_miss(to_id, from_id, &mut Default::default());
-                self[to_id]
-                    .as_rope_mut()
-                    .unwrap()
-                    .record_miss_backtrack_idx
-                    .get_or_insert(from_id);
-                to_id
+            (Some(Node::VariantMatch(_)), Some(Node::Fork(_) | Node::Rope(_))) => {
+                self.clone_with_miss(to_id, from_id, true, &mut Default::default())
             }
             (Some(Node::Rope(from_rope)), Some(Node::Rope(to_rope))) => {
                 let from_rope = from_rope.clone();
@@ -313,86 +298,108 @@ impl<T: Clone> Graph<T> {
 
                 self.insert(to_fork)
             }
-            (a, b) => {
+            (Some(Node::Fork(from_fork)), Some(Node::Fork(to_fork))) => {
+                let from_fork = from_fork.clone();
+                let mut to_fork = to_fork.clone();
+
+                to_fork.merge(from_fork, self);
+
+                self.insert(to_fork)
+            }
+            (Some(Node::Fork(from_fork)), Some(Node::Rope(to_rope))) => {
+                let from_fork = from_fork.clone();
+                let to_rope = to_rope.clone();
+                let mut to_fork = to_rope.fork_off(self);
+
+                to_fork.merge(from_fork, self);
+
+                self.insert(to_fork)
+            }
+            (Some(Node::Rope(from_rope)), Some(Node::Fork(to_fork))) => {
+                let from_rope = from_rope.clone();
+                let mut to_fork = to_fork.clone();
+                let from_fork = from_rope.fork_off(self);
+
+                to_fork.merge(from_fork, self);
+
+                self.insert(to_fork)
+            }
+            (None, Some(_)) | (Some(_), None) | (None, None) => {
                 todo!("Deferred merge not yet implemented")
+            }
+        }
+    }
+
+    fn clone_with_miss(
+        &mut self,
+        node_id: NodeId,
+        miss: NodeId,
+        record_miss_backtrack_idx: bool,
+        mapping: &mut HashMap<NodeId, NodeId>,
+    ) -> NodeId {
+        if matches!(self.nodes[node_id], Some(Node::VariantMatch(_))) {
+            return node_id;
+        }
+
+        if let Some(node_id) = mapping.get(&node_id) {
+            return *node_id;
+        }
+
+        let deferred = self.reserve();
+
+        mapping.insert(node_id, deferred.0);
+
+        match &self.nodes[node_id] {
+            None => panic!("trying to clone reserved node"),
+            Some(Node::VariantMatch(_)) => unreachable!("already handled"),
+            Some(Node::Fork(fork)) => {
+                let mut fork = fork.clone();
+                if let Some(fork_miss) = fork.miss {
+                    fork.miss = Some(self.clone_with_miss(fork_miss, miss, false, mapping));
+                } else {
+                    fork.miss = Some(miss);
+                }
+                if record_miss_backtrack_idx {
+                    fork.record_miss_backtrack_idx = Some(miss);
+                } else if let Some(record_miss_backtrack_idx) = &mut fork.record_miss_backtrack_idx
+                {
+                    *record_miss_backtrack_idx = mapping
+                        .get(record_miss_backtrack_idx)
+                        .copied()
+                        .unwrap_or(*record_miss_backtrack_idx);
+                }
+                fork.lookup_table.iter_mut().for_each(|lookup_node_id| {
+                    if let Some(lookup_node_id) = lookup_node_id {
+                        *lookup_node_id =
+                            self.clone_with_miss(*lookup_node_id, miss, false, mapping);
+                    }
+                });
+                self.insert_reserved(deferred, fork)
+            }
+            Some(Node::Rope(rope)) => {
+                let mut rope = rope.clone();
+                if let Some(rope_miss) = rope.miss {
+                    rope.miss = Some(self.clone_with_miss(rope_miss, miss, false, mapping));
+                } else {
+                    rope.miss = Some(miss);
+                }
+                if record_miss_backtrack_idx {
+                    rope.record_miss_backtrack_idx = Some(miss);
+                } else if let Some(record_miss_backtrack_idx) = &mut rope.record_miss_backtrack_idx
+                {
+                    *record_miss_backtrack_idx = mapping
+                        .get(record_miss_backtrack_idx)
+                        .copied()
+                        .unwrap_or(*record_miss_backtrack_idx);
+                }
+                rope.then = self.clone_with_miss(rope.then, miss, false, mapping);
+                self.insert_reserved(deferred, rope)
             }
         }
     }
 
     fn reserve(&mut self) -> ReservedId {
         ReservedId(self.nodes.insert(None))
-    }
-
-    fn propagate_miss(&mut self, node_id: NodeId, miss: NodeId, visited: &mut HashSet<NodeId>) {
-        if !visited.insert(node_id) {
-            return;
-        }
-
-        match &self[node_id] {
-            Node::Fork(_) => {
-                if self[node_id].as_fork().unwrap().miss.is_none() {
-                    self[node_id].as_fork_mut().unwrap().miss = Some(miss);
-                    (0..LOOKUP_TABLE_SIZE).for_each(|idx| {
-                        if let Some(lookup_node_id) =
-                            self[node_id].as_fork().unwrap().lookup_table[idx]
-                        {
-                            self.propagate_miss(lookup_node_id, miss, visited);
-                            if let Some(fork_miss) = self[node_id].as_fork().unwrap().miss {
-                                if self.loops_to_target(
-                                    lookup_node_id,
-                                    node_id,
-                                    &mut Default::default(),
-                                ) {
-                                    self.propagate_miss(fork_miss, miss, visited);
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-            Node::VariantMatch(_) => {}
-            Node::Rope(_) => {
-                if self[node_id].as_rope().unwrap().miss.is_none() {
-                    self[node_id].as_rope_mut().unwrap().miss = Some(miss);
-                    self.propagate_miss(self[node_id].as_rope().unwrap().then, miss, visited);
-                }
-
-                if let Some(rope_miss) = self[node_id].as_rope().unwrap().miss {
-                    if self.loops_to_target(
-                        node_id,
-                        self[node_id].as_rope().unwrap().then,
-                        &mut Default::default(),
-                    ) {
-                        self.propagate_miss(rope_miss, miss, visited);
-                    }
-                }
-            }
-        }
-    }
-
-    fn loops_to_target(
-        &self,
-        node_id: NodeId,
-        target: NodeId,
-        visited: &mut HashSet<NodeId>,
-    ) -> bool {
-        if node_id == target {
-            return true;
-        }
-
-        if !visited.insert(node_id) {
-            return false;
-        }
-
-        match &self[node_id] {
-            Node::Fork(fork) => fork.lookup_table.iter().any(|node_id| {
-                node_id.map_or(false, |node_id| {
-                    self.loops_to_target(node_id, target, visited)
-                })
-            }),
-            Node::VariantMatch(_) => false,
-            Node::Rope(rope) => self.loops_to_target(rope.then, target, visited),
-        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node<T>)> {

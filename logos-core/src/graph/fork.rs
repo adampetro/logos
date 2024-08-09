@@ -69,12 +69,14 @@ impl Fork {
                     }
                     Node::VariantMatch(_) => {
                         self.miss = Some(miss);
-                        let mut visited = Default::default();
-                        (0..LOOKUP_TABLE_SIZE).for_each(|node_id| {
-                            if let Some(node_id) = self.lookup_table[node_id] {
-                                graph.propagate_miss(node_id, miss, &mut visited);
+                        let mut mapping = Default::default();
+
+                        self.lookup_table.iter_mut().for_each(|lookup_node_id| {
+                            if let Some(node_id) = lookup_node_id {
+                                *node_id =
+                                    graph.clone_with_miss(*node_id, miss, true, &mut mapping);
                             }
-                        });
+                        })
                     }
                 }
             }

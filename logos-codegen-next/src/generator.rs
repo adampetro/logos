@@ -4,12 +4,16 @@ use logos_core::{Fork, Graph, Node, NodeId, Rope, VariantMatch};
 use quote::format_ident;
 use syn::parse_quote;
 
+mod graph_analysis;
+use graph_analysis::BacktrackDistanceAnalysis;
+
 pub(crate) struct Generator<'a> {
     state_idents: Vec<syn::Ident>,
     rope_lookups: IndexSet<[bool; 256]>,
     graph: &'a Graph<&'a syn::Ident>,
     entrypoint: NodeId,
     uses_fast_loop: bool,
+    backtrack_distances: BacktrackDistanceAnalysis,
 }
 
 impl<'a> Generator<'a> {
@@ -27,6 +31,7 @@ impl<'a> Generator<'a> {
             graph,
             entrypoint,
             uses_fast_loop: false,
+            backtrack_distances: BacktrackDistanceAnalysis::new(graph),
         };
 
         let arms = graph
@@ -137,13 +142,9 @@ impl<'a> Generator<'a> {
             }
         };
 
-        let record_miss_backtrack_idx: Option<syn::Stmt> =
-            fork.record_miss_backtrack_idx().map(|node_id| {
-                let backtrack_ident = Self::backtrack_ident(node_id);
-                parse_quote! {
-                    backtrack.#backtrack_ident = lexer.current_end();
-                }
-            });
+        let record_miss_backtrack_idx: Option<syn::Stmt> = fork
+            .record_miss_backtrack_idx()
+            .and_then(|node_id| self.record_miss_backtrack_idx(node_id));
 
         parse_quote! {
             {
@@ -172,13 +173,9 @@ impl<'a> Generator<'a> {
                     }
                 });
 
-        let record_miss_backtrack_idx: Option<syn::Stmt> =
-            rope.record_miss_backtrack_idx().map(|node_id| {
-                let backtrack_ident = Self::backtrack_ident(node_id);
-                parse_quote! {
-                    backtrack.#backtrack_ident = lexer.current_end();
-                }
-            });
+        let record_miss_backtrack_idx: Option<syn::Stmt> = rope
+            .record_miss_backtrack_idx()
+            .and_then(|node_id| self.record_miss_backtrack_idx(node_id));
 
         let on_miss = self.on_miss(rope.miss());
         let length = rope.pattern().len();
@@ -277,13 +274,9 @@ impl<'a> Generator<'a> {
             }
         };
 
-        let record_miss_backtrack_idx: Option<syn::Stmt> =
-            rope.record_miss_backtrack_idx().map(|node_id| {
-                let backtrack_ident = Self::backtrack_ident(node_id);
-                parse_quote! {
-                    backtrack.#backtrack_ident = lexer.current_end();
-                }
-            });
+        let record_miss_backtrack_idx: Option<syn::Stmt> = rope
+            .record_miss_backtrack_idx()
+            .and_then(|node_id| self.record_miss_backtrack_idx(node_id));
 
         let on_miss = record_miss_backtrack_idx
             .into_iter()
@@ -308,6 +301,11 @@ impl<'a> Generator<'a> {
                 Node::VariantMatch(_) => None,
             })
             .unique()
+            .filter(|&idx| {
+                self.backtrack_distances
+                    .static_distance_for_backtrack(idx)
+                    .is_none()
+            })
             .map(Self::backtrack_ident)
             .collect::<Vec<syn::Ident>>();
 
@@ -325,13 +323,38 @@ impl<'a> Generator<'a> {
         format_ident!("backtrack_{}", node_id.to_string())
     }
 
+    fn record_miss_backtrack_idx(&self, node_id: NodeId) -> Option<syn::Stmt> {
+        match self
+            .backtrack_distances
+            .static_distance_for_backtrack(node_id)
+        {
+            Some(_) => None,
+            None => {
+                let backtrack_ident = Self::backtrack_ident(node_id);
+                Some(parse_quote! { backtrack.#backtrack_ident = lexer.current_end(); })
+            }
+        }
+    }
+
     fn on_miss(&self, miss: Option<NodeId>) -> Vec<syn::Stmt> {
         if let Some(miss) = miss {
             let miss_ident = &self.state_idents[*miss];
-            let backtrack_ident = Self::backtrack_ident(miss);
+            let backtrack: Option<syn::Stmt> =
+                match self.backtrack_distances.static_distance_for_backtrack(miss) {
+                    Some(0) => None,
+                    Some(distance) => Some(parse_quote! {
+                        lexer.set_end_unchecked(lexer.current_end() - #distance);
+                    }),
+                    None => {
+                        let backtrack_ident = Self::backtrack_ident(miss);
+                        Some(parse_quote! {
+                            lexer.set_end_unchecked(backtrack.#backtrack_ident);
+                        })
+                    }
+                };
             parse_quote! {
                 state = State::#miss_ident;
-                lexer.set_end_unchecked(backtrack.#backtrack_ident);
+                #backtrack
                 continue 'outer;
             }
         } else {

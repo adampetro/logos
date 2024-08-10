@@ -13,6 +13,7 @@ use crate::{Lexer, Specification};
 use arena::Arena;
 pub use arena::NodeId;
 pub use fork::Fork;
+use itertools::Itertools;
 pub use node::Node;
 pub use rope::Rope;
 pub use variant_match::VariantMatch;
@@ -56,6 +57,8 @@ impl<T: Clone> Graph<T> {
             });
 
         let start_node_id = instance.insert(start_fork);
+
+        instance.fork_to_loop();
 
         let start_node_id = instance.shake(start_node_id);
 
@@ -400,6 +403,32 @@ impl<T: Clone> Graph<T> {
 
     fn reserve(&mut self) -> ReservedId {
         ReservedId(self.nodes.insert(None))
+    }
+
+    fn fork_to_loop(&mut self) {
+        self.nodes.iter_mut().for_each(|(node_id, node)| {
+            if let Some(Node::Fork(fork)) = node {
+                if fork.lookup_table.iter().copied().flatten().unique().count() == 1 {
+                    let pattern = fork
+                        .lookup_table
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(byte, node_id)| node_id.map(|_| byte as u8))
+                        .collect();
+                    let then = fork
+                        .lookup_table
+                        .iter()
+                        .find_map(|node_id| *node_id)
+                        .unwrap();
+                    *node = Some(Node::Rope(Rope {
+                        pattern: vec![pattern],
+                        then,
+                        miss: fork.miss,
+                        record_miss_backtrack_idx: fork.record_miss_backtrack_idx,
+                    }));
+                }
+            }
+        })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node<T>)> {

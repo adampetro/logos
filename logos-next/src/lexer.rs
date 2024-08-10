@@ -60,6 +60,18 @@ impl<'source, Token: Logos<'source>> Lexer<'source, Token> {
     pub fn error(&mut self) {
         self.token_end = self.source.find_boundary(self.token_end);
     }
+
+    #[inline]
+    pub fn test<T, F>(&self, test: F) -> bool
+    where
+        T: crate::Chunk<'source>,
+        F: FnOnce(T) -> bool,
+    {
+        match self.source.read::<T>(self.token_end) {
+            Some(chunk) => test(chunk),
+            None => false,
+        }
+    }
 }
 
 impl<'source, Token: Logos<'source>> Iterator for Lexer<'source, Token> {

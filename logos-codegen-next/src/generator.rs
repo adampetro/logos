@@ -9,6 +9,7 @@ pub(crate) struct Generator<'a> {
     rope_lookups: IndexSet<[bool; 256]>,
     graph: &'a Graph<&'a syn::Ident>,
     entrypoint: NodeId,
+    uses_fast_loop: bool,
 }
 
 impl<'a> Generator<'a> {
@@ -25,6 +26,7 @@ impl<'a> Generator<'a> {
             rope_lookups: IndexSet::new(),
             graph,
             entrypoint,
+            uses_fast_loop: false,
         };
 
         let arms = graph
@@ -53,11 +55,14 @@ impl<'a> Generator<'a> {
 
         let initial_state = &instance.state_idents[*entrypoint];
 
+        let fast_loop_macro = instance.uses_fast_loop.then(Self::fast_loop_macro);
+
         parse_quote! {
             const _: () = {
                 #state_enum
                 #backtrack_struct
                 #rope_lookups
+                #fast_loop_macro
 
                 impl<'source> logos_next::Logos<'source> for #enum_ident {
                     fn lex(lexer: &mut logos_next::Lexer<'source, Self>) -> Option<Result<Self, ()>> {
@@ -65,7 +70,7 @@ impl<'a> Generator<'a> {
                         lexer.trivia();
                         #backtrack_struct_instantiation
 
-                        loop {
+                        'outer: loop {
                             match state {
                                 #(#arms,)*
                             }
@@ -113,9 +118,7 @@ impl<'a> Generator<'a> {
 
         let byte_read: syn::Stmt = if is_entrypoint {
             parse_quote! {
-                let Some(byte) = lexer.read::<u8>() else {
-                    return None;
-                };
+                let byte = lexer.read::<u8>()?;
             }
         } else {
             parse_quote! {
@@ -153,6 +156,10 @@ impl<'a> Generator<'a> {
     }
 
     fn rope_match_arm_body(&mut self, node_id: NodeId, rope: &Rope) -> syn::Expr {
+        if rope.pattern().len() == 1 && rope.then() == node_id {
+            return self.rope_match_arm_body_fast_loop(rope);
+        }
+
         let pattern_as_slice =
             rope.pattern()
                 .iter()
@@ -242,6 +249,55 @@ impl<'a> Generator<'a> {
         }
     }
 
+    fn rope_match_arm_body_fast_loop(&mut self, rope: &Rope) -> syn::Expr {
+        let [pattern] = rope.pattern() else {
+            unreachable!("Rope pattern has more than one byte");
+        };
+
+        self.uses_fast_loop = true;
+
+        let test_defn: syn::Stmt = if pattern.len() == 1 {
+            let byte = pattern.iter().next().copied().unwrap();
+            parse_quote! {
+                let test = |byte: u8| byte == #byte;
+            }
+        } else {
+            let mut lookup_table = [false; 256];
+            pattern.iter().for_each(|byte| {
+                lookup_table[*byte as usize] = true;
+            });
+
+            let (idx, _is_newly_inserted) = self.rope_lookups.insert_full(lookup_table);
+
+            let outer_idx = idx / 8;
+            let inner_idx = idx % 8;
+
+            parse_quote! {
+                let test = |byte: u8| ROPE_LOOKUPS[#outer_idx][byte as usize] & (1 << #inner_idx) != 0;
+            }
+        };
+
+        let record_miss_backtrack_idx: Option<syn::Stmt> =
+            rope.record_miss_backtrack_idx().map(|node_id| {
+                let backtrack_ident = Self::backtrack_ident(node_id);
+                parse_quote! {
+                    backtrack.#backtrack_ident = lexer.current_end();
+                }
+            });
+
+        let on_miss = record_miss_backtrack_idx
+            .into_iter()
+            .chain(self.on_miss(rope.miss()))
+            .collect::<Vec<_>>();
+
+        parse_quote! {
+            {
+                #test_defn
+                _fast_loop!(lexer, test, #(#on_miss)*);
+            }
+        }
+    }
+
     fn generate_backtrack_struct(&self) -> Option<syn::ItemStruct> {
         let backtrack_idxs = self
             .graph
@@ -276,10 +332,10 @@ impl<'a> Generator<'a> {
             parse_quote! {
                 state = State::#miss_ident;
                 lexer.set_end_unchecked(backtrack.#backtrack_ident);
-                continue;
+                continue 'outer;
             }
         } else {
-            parse_quote!(break;)
+            parse_quote!(break 'outer;)
         }
     }
 
@@ -306,6 +362,39 @@ impl<'a> Generator<'a> {
 
         parse_quote! {
             const ROPE_LOOKUPS: [[u8; 256]; #length] = [#(#lookups,)*];
+        }
+    }
+
+    fn fast_loop_macro() -> syn::Item {
+        parse_quote! {
+            macro_rules! _fast_loop {
+                ($lex:ident, $test:ident, $($miss:stmt)*) => {
+                    // Do one bounds check for multiple bytes till EOF
+                    while let Some(arr) = $lex.read::<&[u8; 16]>() {
+                        if $test(arr[0])  { if $test(arr[1])  { if $test(arr[2])  { if $test(arr[3]) {
+                        if $test(arr[4])  { if $test(arr[5])  { if $test(arr[6])  { if $test(arr[7]) {
+                        if $test(arr[8])  { if $test(arr[9])  { if $test(arr[10]) { if $test(arr[11]) {
+                        if $test(arr[12]) { if $test(arr[13]) { if $test(arr[14]) { if $test(arr[15]) {
+
+                        $lex.bump_unchecked(16); continue;     } $lex.bump_unchecked(15); $($miss)* }
+                        $lex.bump_unchecked(14); $($miss)* } $lex.bump_unchecked(13); $($miss)* }
+                        $lex.bump_unchecked(12); $($miss)* } $lex.bump_unchecked(11); $($miss)* }
+                        $lex.bump_unchecked(10); $($miss)* } $lex.bump_unchecked(9); $($miss)*  }
+                        $lex.bump_unchecked(8); $($miss)*  } $lex.bump_unchecked(7); $($miss)*  }
+                        $lex.bump_unchecked(6); $($miss)*  } $lex.bump_unchecked(5); $($miss)*  }
+                        $lex.bump_unchecked(4); $($miss)*  } $lex.bump_unchecked(3); $($miss)*  }
+                        $lex.bump_unchecked(2); $($miss)*  } $lex.bump_unchecked(1); $($miss)*  }
+
+                        $($miss)*
+                    }
+
+                    while $lex.test($test) {
+                        $lex.bump_unchecked(1);
+                    }
+
+                    $($miss)*
+                }
+            }
         }
     }
 }

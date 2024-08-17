@@ -1,31 +1,31 @@
 use crate::graph::{arena::HasNodeIds, Fork, NodeId, Rope, VariantMatch};
 
-#[derive(Debug)]
-pub enum Node<T> {
+#[derive(Debug, PartialEq)]
+pub enum Node<T: PartialEq> {
     Fork(Fork),
     VariantMatch(VariantMatch<T>),
     Rope(Rope),
 }
 
-impl<T> From<Fork> for Node<T> {
+impl<T: PartialEq> From<Fork> for Node<T> {
     fn from(fork: Fork) -> Self {
         Node::Fork(fork)
     }
 }
 
-impl<T> From<VariantMatch<T>> for Node<T> {
+impl<T: PartialEq> From<VariantMatch<T>> for Node<T> {
     fn from(variant_match: VariantMatch<T>) -> Self {
         Node::VariantMatch(variant_match)
     }
 }
 
-impl<T> From<Rope> for Node<T> {
+impl<T: PartialEq> From<Rope> for Node<T> {
     fn from(rope: Rope) -> Self {
         Node::Rope(rope)
     }
 }
 
-impl<T> HasNodeIds for Node<T> {
+impl<T: PartialEq> HasNodeIds for Node<T> {
     fn update_node_ids(&mut self, f: impl Fn(&mut NodeId)) {
         match self {
             Node::Fork(fork) => fork.update_node_ids(f),

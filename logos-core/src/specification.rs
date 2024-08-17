@@ -107,7 +107,7 @@ mod tests {
                 Specification::new_str_sequence("foo"),
                 Specification::new_str_sequence("hello"),
             ]),
-            Specification::new_loop(0, Some(1), Specification::new_str_sequence("bar")),
+            Specification::maybe(Specification::new_str_sequence("bar")),
         ]);
         assert_eq!(specification.default_priority(), 6);
     }

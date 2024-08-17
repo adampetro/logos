@@ -5,7 +5,7 @@ use crate::graph::arena::HasNodeIds;
 use crate::graph::{Fork, Graph, NodeId};
 use crate::specification::{Sequence, Specification};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Rope {
     pub(crate) pattern: Vec<HashSet<u8>>,
     pub(crate) then: NodeId,
@@ -39,7 +39,7 @@ impl Rope {
             })
     }
 
-    pub(crate) fn fork_off<T: Clone>(self, graph: &mut Graph<T>) -> Fork {
+    pub(crate) fn fork_off<T: Clone + PartialEq>(self, graph: &mut Graph<T>) -> Fork {
         let Self {
             mut pattern,
             then,

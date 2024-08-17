@@ -22,14 +22,18 @@ pub use variant_match::VariantMatch;
 struct ReservedId(NodeId);
 
 #[derive(Debug)]
-pub struct Graph<T> {
+pub struct Graph<T: Clone + PartialEq> {
     nodes: Arena<Option<Node<T>>>,
+    merges: HashMap<[NodeId; 2], NodeId>,
+    clones_with_miss: HashMap<(NodeId, NodeId), NodeId>,
 }
 
-impl<T: Clone> Graph<T> {
+impl<T: Clone + PartialEq> Graph<T> {
     pub fn for_lexer(lexer: &Lexer<T>) -> (Self, NodeId) {
         let mut instance = Self {
             nodes: Arena::default(),
+            merges: Default::default(),
+            clones_with_miss: Default::default(),
         };
         let mut start_fork = Fork::new(None, None);
 
@@ -58,7 +62,7 @@ impl<T: Clone> Graph<T> {
 
         let start_node_id = instance.insert(start_fork);
 
-        instance.fork_to_loop();
+        instance.fork_to_rope();
 
         let start_node_id = instance.shake(start_node_id);
 
@@ -66,7 +70,19 @@ impl<T: Clone> Graph<T> {
     }
 
     fn insert(&mut self, node: impl Into<Node<T>>) -> NodeId {
-        self.nodes.insert(Some(node.into()))
+        let node = node.into();
+
+        let existing_node_id = self
+            .nodes
+            .iter()
+            .find(|(_, node_for_id)| matches!(node_for_id, Some(n) if n == &node))
+            .map(|(id, _)| id);
+
+        if let Some(existing_node_id) = existing_node_id {
+            existing_node_id
+        } else {
+            self.nodes.insert(Some(node))
+        }
     }
 
     fn insert_reserved(&mut self, reserved_id: ReservedId, node: impl Into<Node<T>>) -> NodeId {
@@ -281,15 +297,21 @@ impl<T: Clone> Graph<T> {
     }
 
     pub(crate) fn merge(&mut self, from_id: NodeId, to_id: NodeId) -> NodeId {
+        let mut key = [from_id, to_id];
+        key.sort();
+        if let Some(node_id) = self.merges.get(&key) {
+            return *node_id;
+        }
+
         let from = &self.nodes[from_id];
         let to = &self.nodes[to_id];
 
-        match (from, to) {
+        let merge_id = match (from, to) {
             // assume insert in inverse order of priority, so the priority of
             // the to node is always higher
             (_, Some(Node::VariantMatch(_))) => to_id,
             (Some(Node::VariantMatch(_)), Some(Node::Fork(_) | Node::Rope(_))) => {
-                self.clone_with_miss(to_id, from_id, true, &mut Default::default())
+                self.clone_with_miss(to_id, from_id, true)
             }
             (Some(Node::Rope(from_rope)), Some(Node::Rope(to_rope))) => {
                 let from_rope = from_rope.clone();
@@ -330,7 +352,17 @@ impl<T: Clone> Graph<T> {
             (None, Some(_)) | (Some(_), None) | (None, None) => {
                 todo!("Deferred merge not yet implemented")
             }
-        }
+        };
+
+        self.merges.insert(key, merge_id);
+        let mut key = [to_id, merge_id];
+        key.sort();
+        self.merges.insert(key, merge_id);
+        let mut key = [from_id, merge_id];
+        key.sort();
+        self.merges.insert([from_id, merge_id], merge_id);
+
+        merge_id
     }
 
     fn clone_with_miss(
@@ -338,19 +370,28 @@ impl<T: Clone> Graph<T> {
         node_id: NodeId,
         miss: NodeId,
         record_miss_backtrack_idx: bool,
-        mapping: &mut HashMap<NodeId, NodeId>,
     ) -> NodeId {
         if matches!(self.nodes[node_id], Some(Node::VariantMatch(_))) {
             return node_id;
         }
 
-        if let Some(node_id) = mapping.get(&node_id) {
+        if matches!(&self.nodes[node_id], Some(Node::Fork(fork)) if fork.miss == Some(miss) && (!record_miss_backtrack_idx || fork.record_miss_backtrack_idx == Some(miss)))
+        {
+            return node_id;
+        }
+
+        if matches!(&self.nodes[node_id], Some(Node::Rope(rope)) if rope.miss == Some(miss) && (!record_miss_backtrack_idx || rope.record_miss_backtrack_idx == Some(miss)))
+        {
+            return node_id;
+        }
+
+        if let Some(node_id) = self.clones_with_miss.get(&(node_id, miss)) {
             return *node_id;
         }
 
         let deferred = self.reserve();
 
-        mapping.insert(node_id, deferred.0);
+        self.clones_with_miss.insert((node_id, miss), deferred.0);
 
         match &self.nodes[node_id] {
             None => panic!("trying to clone reserved node"),
@@ -358,7 +399,7 @@ impl<T: Clone> Graph<T> {
             Some(Node::Fork(fork)) => {
                 let mut fork = fork.clone();
                 if let Some(fork_miss) = fork.miss {
-                    fork.miss = Some(self.clone_with_miss(fork_miss, miss, false, mapping));
+                    fork.miss = Some(self.clone_with_miss(fork_miss, miss, false));
                 } else {
                     fork.miss = Some(miss);
                 }
@@ -366,15 +407,15 @@ impl<T: Clone> Graph<T> {
                     fork.record_miss_backtrack_idx = Some(miss);
                 } else if let Some(record_miss_backtrack_idx) = &mut fork.record_miss_backtrack_idx
                 {
-                    *record_miss_backtrack_idx = mapping
-                        .get(record_miss_backtrack_idx)
+                    *record_miss_backtrack_idx = self
+                        .clones_with_miss
+                        .get(&(*record_miss_backtrack_idx, miss))
                         .copied()
                         .unwrap_or(*record_miss_backtrack_idx);
                 }
                 fork.lookup_table.iter_mut().for_each(|lookup_node_id| {
                     if let Some(lookup_node_id) = lookup_node_id {
-                        *lookup_node_id =
-                            self.clone_with_miss(*lookup_node_id, miss, false, mapping);
+                        *lookup_node_id = self.clone_with_miss(*lookup_node_id, miss, false);
                     }
                 });
                 self.insert_reserved(deferred, fork)
@@ -382,7 +423,7 @@ impl<T: Clone> Graph<T> {
             Some(Node::Rope(rope)) => {
                 let mut rope = rope.clone();
                 if let Some(rope_miss) = rope.miss {
-                    rope.miss = Some(self.clone_with_miss(rope_miss, miss, false, mapping));
+                    rope.miss = Some(self.clone_with_miss(rope_miss, miss, false));
                 } else {
                     rope.miss = Some(miss);
                 }
@@ -390,12 +431,13 @@ impl<T: Clone> Graph<T> {
                     rope.record_miss_backtrack_idx = Some(miss);
                 } else if let Some(record_miss_backtrack_idx) = &mut rope.record_miss_backtrack_idx
                 {
-                    *record_miss_backtrack_idx = mapping
-                        .get(record_miss_backtrack_idx)
+                    *record_miss_backtrack_idx = self
+                        .clones_with_miss
+                        .get(&(*record_miss_backtrack_idx, miss))
                         .copied()
                         .unwrap_or(*record_miss_backtrack_idx);
                 }
-                rope.then = self.clone_with_miss(rope.then, miss, false, mapping);
+                rope.then = self.clone_with_miss(rope.then, miss, false);
                 self.insert_reserved(deferred, rope)
             }
         }
@@ -405,7 +447,7 @@ impl<T: Clone> Graph<T> {
         ReservedId(self.nodes.insert(None))
     }
 
-    fn fork_to_loop(&mut self) {
+    fn fork_to_rope(&mut self) {
         self.nodes.iter_mut().for_each(|(node_id, node)| {
             if let Some(Node::Fork(fork)) = node {
                 if fork.lookup_table.iter().copied().flatten().unique().count() == 1 {
@@ -438,7 +480,7 @@ impl<T: Clone> Graph<T> {
     }
 }
 
-impl<T> Index<NodeId> for Graph<T> {
+impl<T: Clone + PartialEq> Index<NodeId> for Graph<T> {
     type Output = Node<T>;
 
     fn index(&self, index: NodeId) -> &Self::Output {
@@ -448,10 +490,59 @@ impl<T> Index<NodeId> for Graph<T> {
     }
 }
 
-impl<T> IndexMut<NodeId> for Graph<T> {
+impl<T: Clone + PartialEq> IndexMut<NodeId> for Graph<T> {
     fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
         self.nodes[index]
             .as_mut()
             .expect("trying to access reserved node")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Graph;
+    use crate::{Lexer, Specification, Variant};
+
+    #[test]
+    fn test_graph() {
+        let lexer = Lexer::new(vec![
+            Variant::new("foo", Specification::new_str_sequence("foo"), None),
+            // Variant::new("bar", Specification::new_str_sequence("bar"), None),
+            // Variant::new(
+            //     "number",
+            //     Specification::new_loop(1, None, Specification::ascii_digit()),
+            //     None,
+            // ),
+            // Variant::new(
+            //     "abcdefghi",
+            //     Specification::new_sequence(vec![
+            //         Specification::new_any(vec![
+            //             Specification::Byte(b'a'),
+            //             Specification::Byte(b'b'),
+            //             Specification::Byte(b'c'),
+            //         ]),
+            //         Specification::new_any(vec![
+            //             Specification::Byte(b'd'),
+            //             Specification::Byte(b'e'),
+            //             Specification::Byte(b'f'),
+            //         ]),
+            //         Specification::new_any(vec![
+            //             Specification::Byte(b'g'),
+            //             Specification::Byte(b'h'),
+            //             Specification::Byte(b'i'),
+            //         ]),
+            //     ]),
+            //     None,
+            // ),
+            Variant::new(
+                "text",
+                Specification::new_loop(1, None, Specification::ascii_alphabetic()),
+                None,
+            ),
+        ])
+        .unwrap();
+        let (graph, _) = Graph::for_lexer(&lexer);
+        dbg!(&graph);
+        assert_eq!(graph.iter().count(), 0);
     }
 }

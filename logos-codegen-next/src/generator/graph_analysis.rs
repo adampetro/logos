@@ -8,7 +8,7 @@ pub(crate) struct BacktrackDistanceAnalysis {
 }
 
 impl BacktrackDistanceAnalysis {
-    pub(crate) fn new<T: Clone>(graph: &Graph<T>) -> Self {
+    pub(crate) fn new<T: Clone + PartialEq>(graph: &Graph<T>) -> Self {
         let mut distances = HashMap::new();
 
         graph.iter().for_each(|(node_id, node)| {
@@ -67,7 +67,7 @@ impl BacktrackDistanceAnalysis {
         Self { distances }
     }
 
-    fn distance_to_node_miss<T>(
+    fn distance_to_node_miss<T: Clone + PartialEq>(
         node_id: NodeId,
         target_miss: NodeId,
         graph: &Graph<T>,

@@ -6,7 +6,7 @@ use crate::specification::Any;
 
 pub const LOOKUP_TABLE_SIZE: usize = 256;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Fork {
     pub(crate) lookup_table: Box<[Option<NodeId>; LOOKUP_TABLE_SIZE]>,
     pub(crate) miss: Option<NodeId>,
@@ -42,7 +42,7 @@ impl Fork {
             })
     }
 
-    pub(crate) fn merge<T: Clone>(&mut self, other: Fork, graph: &mut Graph<T>) {
+    pub(crate) fn merge<T: Clone + PartialEq>(&mut self, other: Fork, graph: &mut Graph<T>) {
         (0..LOOKUP_TABLE_SIZE).for_each(|idx| {
             let other_to = other.lookup_table[idx];
             let to = self.lookup_table[idx];
@@ -69,12 +69,10 @@ impl Fork {
                     }
                     Node::VariantMatch(_) => {
                         self.miss = Some(miss);
-                        let mut mapping = Default::default();
 
                         self.lookup_table.iter_mut().for_each(|lookup_node_id| {
                             if let Some(node_id) = lookup_node_id {
-                                *node_id =
-                                    graph.clone_with_miss(*node_id, miss, true, &mut mapping);
+                                *node_id = graph.clone_with_miss(*node_id, miss, true);
                             }
                         })
                     }

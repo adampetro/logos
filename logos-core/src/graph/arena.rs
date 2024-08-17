@@ -96,6 +96,13 @@ impl<T> Arena<T> {
 
         get_new_node_id(entry_node_id)
     }
+
+    pub(crate) fn map<F, U>(self, mut f: F) -> Arena<U>
+    where
+        F: FnMut(T) -> U,
+    {
+        Arena(self.0.into_iter().map(&mut f).collect())
+    }
 }
 
 impl<T: Debug> Debug for Arena<T> {

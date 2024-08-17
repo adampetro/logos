@@ -1,7 +1,7 @@
 mod token;
 
 use crate::{
-    graph::{Graph, Node, NodeId},
+    graph::{Error, Graph, Node, NodeId},
     Lexer, SimpleVariantMatch,
 };
 use std::collections::HashMap;
@@ -10,22 +10,24 @@ pub use token::Token;
 #[derive(Debug)]
 pub struct Interpreter<'a> {
     graph: Graph<'a, SimpleVariantMatch<'a>>,
-    start_node_id: NodeId,
     bytes: &'a [u8],
     current_idx: usize,
     backtrack_idxs: HashMap<NodeId, usize>,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(lexer: &'a Lexer<SimpleVariantMatch<'a>>, bytes: &'a [u8]) -> Self {
-        let (graph, start_node_id) = Graph::for_lexer(lexer);
-        Self {
+    pub fn new(
+        lexer: &'a Lexer<SimpleVariantMatch<'a>>,
+        bytes: &'a [u8],
+    ) -> Result<Self, Vec<Error<'a, SimpleVariantMatch<'a>>>> {
+        // TODO: handle errors
+        let graph = Graph::for_lexer(lexer)?;
+        Ok(Self {
             graph,
-            start_node_id,
             bytes,
             current_idx: 0,
             backtrack_idxs: HashMap::new(),
-        }
+        })
     }
 }
 
@@ -38,8 +40,8 @@ impl<'a> Iterator for Interpreter<'a> {
         }
 
         let mut idx = self.current_idx;
-        let mut current_node_id = self.start_node_id;
-        let mut current_node = &self.graph[self.start_node_id];
+        let mut current_node_id = self.graph.start_node_id();
+        let mut current_node = &self.graph[current_node_id];
 
         loop {
             dbg!(idx, current_node_id);

@@ -1,26 +1,11 @@
 use crate::graph::{arena::HasNodeIds, Fork, NodeId, Rope};
 use crate::VariantMatch;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Node<'a, T: VariantMatch> {
     Fork(Fork),
     VariantMatch(&'a T),
     Rope(Rope),
-}
-
-impl<T: VariantMatch> PartialEq for Node<'_, T> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Node::Fork(fork), Node::Fork(other_fork)) => fork == other_fork,
-            (Node::VariantMatch(variant_match), Node::VariantMatch(other_variant_match)) => {
-                variant_match.is_same_variant(other_variant_match)
-                    && variant_match.priority() == other_variant_match.priority()
-                    && variant_match.specification() == other_variant_match.specification()
-            }
-            (Node::Rope(rope), Node::Rope(other_rope)) => rope == other_rope,
-            _ => false,
-        }
-    }
 }
 
 impl<T: VariantMatch> From<Fork> for Node<'_, T> {

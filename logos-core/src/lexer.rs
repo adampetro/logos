@@ -12,7 +12,7 @@ impl<T: VariantMatch> Lexer<T> {
         Ok(Self { variant_matches })
     }
 
-    pub(crate) fn variant_matches(&self) -> &[T] {
+    pub fn variant_matches(&self) -> &[T] {
         &self.variant_matches
     }
 }

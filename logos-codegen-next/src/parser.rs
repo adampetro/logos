@@ -128,6 +128,7 @@ impl Parser {
     }
 }
 
+#[derive(PartialEq)]
 pub(crate) struct VariantMatch<'a> {
     pub(crate) name: &'a syn::Ident,
     pub(crate) specification: Specification,
@@ -150,9 +151,5 @@ impl logos_core::VariantMatch for VariantMatch<'_> {
 
     fn priority(&self) -> usize {
         self.priority
-    }
-
-    fn is_same_variant(&self, other: &Self) -> bool {
-        self.name == other.name
     }
 }

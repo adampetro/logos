@@ -1,4 +1,4 @@
-use logos_core::Graph;
+use logos_core::graph::Graph;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::parse_macro_input;
@@ -23,9 +23,8 @@ pub fn logos(input: TokenStream) -> TokenStream {
         }
     };
 
-    let (graph, entrypoint) = Graph::for_lexer(&lexer);
+    // TODO: handle errors
+    let graph = Graph::for_lexer(&lexer).unwrap();
 
-    Generator::generate(name, &graph, entrypoint)
-        .into_token_stream()
-        .into()
+    Generator::generate(name, &graph).into_token_stream().into()
 }

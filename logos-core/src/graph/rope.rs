@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 
 use crate::graph::arena::HasNodeIds;
-use crate::graph::{Fork, Graph, NodeId};
+use crate::graph::{Fork, GraphBuilder, NodeId};
 use crate::specification::{Sequence, Specification};
 use crate::VariantMatch;
 
@@ -40,7 +40,7 @@ impl Rope {
             })
     }
 
-    pub(crate) fn fork_off<T: VariantMatch>(self, graph: &mut Graph<T>) -> Fork {
+    pub(crate) fn fork_off<T: VariantMatch>(self, graph_builder: &mut GraphBuilder<T>) -> Fork {
         let Self {
             mut pattern,
             then,
@@ -53,7 +53,7 @@ impl Rope {
         let then = if pattern.is_empty() {
             then
         } else {
-            graph.insert(Self {
+            graph_builder.insert(Self {
                 pattern,
                 then,
                 miss,

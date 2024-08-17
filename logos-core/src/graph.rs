@@ -19,19 +19,28 @@ pub use rope::Rope;
 #[derive(Debug)]
 struct ReservedId(NodeId);
 
+#[derive(Debug, PartialEq)]
+pub enum Error<'a, T: VariantMatch> {
+    VariantMatchesOverlapWithSamePriority(&'a T, &'a T),
+}
+
 #[derive(Debug)]
 pub struct Graph<'a, T: VariantMatch> {
-    nodes: Arena<Option<Node<'a, T>>>,
-    merges: HashMap<[NodeId; 2], NodeId>,
-    clones_with_miss: HashMap<(NodeId, NodeId), NodeId>,
+    nodes: Arena<Node<'a, T>>,
+    start_node_id: NodeId,
 }
 
 impl<'a, T: VariantMatch> Graph<'a, T> {
-    pub fn for_lexer(lexer: &'a Lexer<T>) -> (Self, NodeId) {
-        let mut instance = Self {
+    pub fn start_node_id(&self) -> NodeId {
+        self.start_node_id
+    }
+
+    pub fn for_lexer(lexer: &'a Lexer<T>) -> Result<Self, Vec<Error<'a, T>>> {
+        let mut builder = GraphBuilder {
             nodes: Arena::default(),
-            merges: Default::default(),
-            clones_with_miss: Default::default(),
+            merges: HashMap::new(),
+            clones_with_miss: HashMap::new(),
+            errors: Vec::new(),
         };
         let mut start_fork = Fork::new(None, None);
 
@@ -40,19 +49,48 @@ impl<'a, T: VariantMatch> Graph<'a, T> {
         variant_matches.sort_by_key(|variant_match| usize::MAX - variant_match.priority());
 
         variant_matches.into_iter().for_each(|variant_match| {
-            let fork_for_variant_match = instance.fork_for_variant_match(variant_match);
-            start_fork.merge(fork_for_variant_match, &mut instance);
+            let fork_for_variant_match = builder.fork_for_variant_match(variant_match);
+            start_fork.merge(fork_for_variant_match, &mut builder);
         });
 
-        let start_node_id = instance.insert(start_fork);
+        let start_node_id = builder.insert(start_fork);
 
-        instance.fork_to_rope();
+        if !builder.errors.is_empty() {
+            return Err(builder.errors);
+        }
 
-        let start_node_id = instance.shake(start_node_id);
+        builder.fork_to_rope();
 
-        (instance, start_node_id)
+        let start_node_id = builder.shake(start_node_id);
+
+        Ok(Self {
+            nodes: builder.nodes.map(|node| node.expect("reserved node")),
+            start_node_id,
+        })
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node<T>)> {
+        self.nodes.iter()
+    }
+}
+
+impl<'a, T: VariantMatch> Index<NodeId> for Graph<'a, T> {
+    type Output = Node<'a, T>;
+
+    fn index(&self, index: NodeId) -> &Self::Output {
+        &self.nodes[index]
+    }
+}
+
+#[derive(Debug)]
+pub struct GraphBuilder<'a, T: VariantMatch> {
+    nodes: Arena<Option<Node<'a, T>>>,
+    merges: HashMap<[NodeId; 2], NodeId>,
+    clones_with_miss: HashMap<(NodeId, NodeId), NodeId>,
+    errors: Vec<Error<'a, T>>,
+}
+
+impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     fn insert(&mut self, node: impl Into<Node<'a, T>>) -> NodeId {
         let node = node.into();
 
@@ -272,6 +310,14 @@ impl<'a, T: VariantMatch> Graph<'a, T> {
         }
     }
 
+    fn fork_off(&mut self, node_id: NodeId) -> Fork {
+        match &self[node_id] {
+            Node::Fork(fork) => fork.clone(),
+            Node::Rope(rope) => rope.clone().fork_off(self),
+            Node::VariantMatch(_) => Fork::new(Some(node_id), Some(node_id)),
+        }
+    }
+
     pub(crate) fn merge(&mut self, from_id: NodeId, to_id: NodeId) -> NodeId {
         let mut key = [from_id, to_id];
         key.sort();
@@ -282,47 +328,28 @@ impl<'a, T: VariantMatch> Graph<'a, T> {
         let from = &self.nodes[from_id];
         let to = &self.nodes[to_id];
 
+        dbg!(&from, &to);
+
         let merge_id = match (from, to) {
-            // assume insert in inverse order of priority, so the priority of
-            // the to node is always higher
-            (_, Some(Node::VariantMatch(_))) => to_id,
-            (Some(Node::VariantMatch(_)), Some(Node::Fork(_) | Node::Rope(_))) => {
-                self.clone_with_miss(to_id, from_id, true)
+            (Some(Node::VariantMatch(from)), Some(Node::VariantMatch(to))) => {
+                if from == to {
+                    to_id
+                } else if from.priority() == to.priority() {
+                    self.errors
+                        .push(Error::VariantMatchesOverlapWithSamePriority(from, to));
+                    to_id
+                } else if from.priority() > to.priority() {
+                    from_id
+                } else {
+                    to_id
+                }
             }
-            (Some(Node::Rope(from_rope)), Some(Node::Rope(to_rope))) => {
-                let from_rope = from_rope.clone();
-                let to_rope = to_rope.clone();
-                let from_fork = from_rope.fork_off(self);
-                let mut to_fork = to_rope.fork_off(self);
-
+            (_, Some(Node::VariantMatch(_))) => self.clone_with_miss(from_id, to_id, true),
+            (Some(Node::VariantMatch(_)), _) => self.clone_with_miss(to_id, from_id, true),
+            (Some(_), Some(_)) => {
+                let from_fork = self.fork_off(from_id);
+                let mut to_fork = self.fork_off(to_id);
                 to_fork.merge(from_fork, self);
-
-                self.insert(to_fork)
-            }
-            (Some(Node::Fork(from_fork)), Some(Node::Fork(to_fork))) => {
-                let from_fork = from_fork.clone();
-                let mut to_fork = to_fork.clone();
-
-                to_fork.merge(from_fork, self);
-
-                self.insert(to_fork)
-            }
-            (Some(Node::Fork(from_fork)), Some(Node::Rope(to_rope))) => {
-                let from_fork = from_fork.clone();
-                let to_rope = to_rope.clone();
-                let mut to_fork = to_rope.fork_off(self);
-
-                to_fork.merge(from_fork, self);
-
-                self.insert(to_fork)
-            }
-            (Some(Node::Rope(from_rope)), Some(Node::Fork(to_fork))) => {
-                let from_rope = from_rope.clone();
-                let mut to_fork = to_fork.clone();
-                let from_fork = from_rope.fork_off(self);
-
-                to_fork.merge(from_fork, self);
-
                 self.insert(to_fork)
             }
             (None, Some(_)) | (Some(_), None) | (None, None) => {
@@ -448,15 +475,9 @@ impl<'a, T: VariantMatch> Graph<'a, T> {
             }
         })
     }
-
-    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node<T>)> {
-        self.nodes
-            .iter()
-            .map(|(id, node)| (id, node.as_ref().unwrap()))
-    }
 }
 
-impl<'a, T: VariantMatch> Index<NodeId> for Graph<'a, T> {
+impl<'a, T: VariantMatch> Index<NodeId> for GraphBuilder<'a, T> {
     type Output = Node<'a, T>;
 
     fn index(&self, index: NodeId) -> &Self::Output {
@@ -466,7 +487,7 @@ impl<'a, T: VariantMatch> Index<NodeId> for Graph<'a, T> {
     }
 }
 
-impl<'a, T: VariantMatch> IndexMut<NodeId> for Graph<'a, T> {
+impl<'a, T: VariantMatch> IndexMut<NodeId> for GraphBuilder<'a, T> {
     fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
         self.nodes[index]
             .as_mut()

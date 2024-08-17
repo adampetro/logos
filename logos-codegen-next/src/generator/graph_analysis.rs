@@ -1,6 +1,6 @@
 use crate::parser::VariantMatch;
 use itertools::Itertools;
-use logos_core::{Graph, Node, NodeId};
+use logos_core::graph::{Graph, Node, NodeId};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 #[derive(Debug)]

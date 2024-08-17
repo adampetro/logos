@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use crate::graph::arena::HasNodeIds;
-use crate::graph::{Graph, Node, NodeId};
+use crate::graph::{GraphBuilder, NodeId};
 use crate::specification::Any;
 use crate::VariantMatch;
 
@@ -43,47 +43,58 @@ impl Fork {
             })
     }
 
-    pub(crate) fn merge<T: VariantMatch>(&mut self, other: Fork, graph: &mut Graph<T>) {
+    pub(crate) fn merge<T: VariantMatch>(
+        &mut self,
+        other: Fork,
+        graph_builder: &mut GraphBuilder<T>,
+    ) {
         (0..LOOKUP_TABLE_SIZE).for_each(|idx| {
             let other_to = other.lookup_table[idx];
             let to = self.lookup_table[idx];
 
             let new_to = match (other_to, to) {
                 (None, None) => None,
-                (Some(id), None) | (None, Some(id)) => Some(id),
-                (Some(from_id), Some(to_id)) => Some(graph.merge(from_id, to_id)),
+                (Some(id), None) => {
+                    if let Some(miss) = other.miss {
+                        Some(graph_builder.merge(id, miss))
+                    } else {
+                        Some(id)
+                    }
+                }
+                (None, Some(id)) => {
+                    if let Some(miss) = self.miss {
+                        Some(graph_builder.merge(miss, id))
+                    } else {
+                        Some(id)
+                    }
+                }
+                (Some(from_id), Some(to_id)) => Some(graph_builder.merge(from_id, to_id)),
             };
 
             self.lookup_table[idx] = new_to;
         });
-        if let Some(miss) = other.miss {
-            if self.miss.is_none() {
-                match &graph[miss] {
-                    Node::Fork(fork) => {
-                        let fork = fork.clone();
-                        self.merge(fork, graph);
-                    }
-                    Node::Rope(rope) => {
-                        let rope = rope.clone();
-                        let fork = rope.fork_off(graph);
-                        self.merge(fork, graph);
-                    }
-                    Node::VariantMatch(_) => {
-                        self.miss = Some(miss);
-
-                        self.lookup_table.iter_mut().for_each(|lookup_node_id| {
-                            if let Some(node_id) = lookup_node_id {
-                                *node_id = graph.clone_with_miss(*node_id, miss, true);
-                            }
-                        })
-                    }
-                }
+        let record_miss_backtrack_idx_is_for_miss = self.miss == self.record_miss_backtrack_idx;
+        let other_record_miss_backtrack_idx_is_for_miss =
+            other.miss == other.record_miss_backtrack_idx;
+        self.miss = match (self.miss, other.miss) {
+            (Some(self_miss), Some(other_miss)) => Some(graph_builder.merge(self_miss, other_miss)),
+            (None, Some(other_miss)) => Some(other_miss),
+            (self_miss, None) => self_miss,
+        };
+        self.record_miss_backtrack_idx = match (
+            self.record_miss_backtrack_idx,
+            other.record_miss_backtrack_idx,
+        ) {
+            (Some(_), Some(_))
+                if record_miss_backtrack_idx_is_for_miss
+                    || other_record_miss_backtrack_idx_is_for_miss =>
+            {
+                self.miss
             }
-        }
-        if let Some(record_miss_backtrack_idx) = other.record_miss_backtrack_idx {
-            self.record_miss_backtrack_idx
-                .get_or_insert(record_miss_backtrack_idx);
-        }
+            _ => self
+                .record_miss_backtrack_idx
+                .or(other.record_miss_backtrack_idx),
+        };
     }
 
     pub fn lookup_table(&self) -> &[Option<NodeId>; 256] {

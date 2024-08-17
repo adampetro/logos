@@ -1,11 +1,11 @@
 use crate::Specification;
 
-pub trait VariantMatch: std::fmt::Debug {
+pub trait VariantMatch: std::fmt::Debug + PartialEq {
     fn priority(&self) -> usize;
     fn specification(&self) -> &Specification;
-    fn is_same_variant(&self, other: &Self) -> bool;
 }
 
+#[derive(PartialEq)]
 pub struct SimpleVariantMatch<'a> {
     name: &'a str,
     specification: Specification,
@@ -28,10 +28,6 @@ impl<'a> VariantMatch for SimpleVariantMatch<'a> {
 
     fn specification(&self) -> &Specification {
         &self.specification
-    }
-
-    fn is_same_variant(&self, other: &Self) -> bool {
-        self.name == other.name
     }
 }
 

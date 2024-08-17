@@ -1,6 +1,6 @@
 use indexmap::IndexSet;
 use itertools::Itertools;
-use logos_core::{Fork, Graph, Node, NodeId, Rope};
+use logos_core::graph::{Fork, Graph, Node, NodeId, Rope};
 use quote::format_ident;
 use syn::parse_quote;
 
@@ -12,7 +12,6 @@ pub(crate) struct Generator<'a> {
     state_idents: Vec<syn::Ident>,
     rope_lookups: IndexSet<[bool; 256]>,
     graph: &'a Graph<'a, VariantMatch<'a>>,
-    entrypoint: NodeId,
     uses_fast_loop: bool,
     backtrack_distances: BacktrackDistanceAnalysis,
 }
@@ -21,7 +20,6 @@ impl<'a> Generator<'a> {
     pub(crate) fn generate(
         enum_ident: &syn::Ident,
         graph: &'a Graph<'a, VariantMatch<'a>>,
-        entrypoint: NodeId,
     ) -> syn::Item {
         let mut instance = Self {
             state_idents: graph
@@ -30,7 +28,6 @@ impl<'a> Generator<'a> {
                 .collect(),
             rope_lookups: IndexSet::new(),
             graph,
-            entrypoint,
             uses_fast_loop: false,
             backtrack_distances: BacktrackDistanceAnalysis::new(graph),
         };
@@ -59,7 +56,7 @@ impl<'a> Generator<'a> {
 
         let rope_lookups = instance.generate_rope_lookups();
 
-        let initial_state = &instance.state_idents[*entrypoint];
+        let initial_state = &instance.state_idents[*graph.start_node_id()];
 
         let fast_loop_macro = instance.uses_fast_loop.then(Self::fast_loop_macro);
 
@@ -119,7 +116,7 @@ impl<'a> Generator<'a> {
             }
         });
 
-        let is_entrypoint = node_id == self.entrypoint;
+        let is_entrypoint = node_id == self.graph.start_node_id();
         let on_miss = self.on_miss(fork.miss());
 
         let byte_read: syn::Stmt = if is_entrypoint {

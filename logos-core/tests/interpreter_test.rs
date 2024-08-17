@@ -43,7 +43,7 @@ fn test_interpreter() {
     ])
     .unwrap();
 
-    let interpreter = Interpreter::new(&lexer, b"abcdefdef1234.567");
+    let interpreter = Interpreter::new(&lexer, b"abcdefdef1234.567").unwrap();
 
     dbg!(&interpreter);
 
@@ -88,7 +88,7 @@ fn test_logos_bug() {
     ])
     .unwrap();
 
-    let interpreter = Interpreter::new(&lexer, b"dedede");
+    let interpreter = Interpreter::new(&lexer, b"dedede").unwrap();
 
     dbg!(&interpreter);
 
@@ -114,7 +114,7 @@ fn test_similar_tokens() {
     ])
     .unwrap();
 
-    let interpreter = Interpreter::new(&lexer, b"aaaa");
+    let interpreter = Interpreter::new(&lexer, b"aaaa").unwrap();
 
     dbg!(&interpreter);
 
@@ -238,7 +238,7 @@ fn test_json() {
     ])
     .unwrap();
 
-    let interpreter = Interpreter::new(&lexer, b"truefalse{}[]:,null3.14159e0\"string\"");
+    let interpreter = Interpreter::new(&lexer, b"truefalse{}[]:,null3.14159e0\"string\"").unwrap();
 
     dbg!(&interpreter);
 

@@ -5,7 +5,7 @@ mod rope;
 
 use std::{
     collections::{HashMap, HashSet},
-    ops::{Index, IndexMut},
+    ops::Index,
 };
 
 use crate::{Lexer, Specification, VariantMatch};
@@ -283,8 +283,8 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
         if !seen_nodes.insert(node_id) {
             return;
         }
-        match &self[node_id] {
-            Node::Fork(fork) => {
+        match &self.nodes[node_id] {
+            Some(Node::Fork(fork)) => {
                 fork.lookup_table.iter().for_each(|node_id| {
                     if let Some(node_id) = node_id {
                         self.visit_node(*node_id, seen_nodes);
@@ -297,8 +297,8 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                     self.visit_node(record_miss_backtrack_idx, seen_nodes);
                 }
             }
-            Node::VariantMatch(_) => {}
-            Node::Rope(rope) => {
+            Some(Node::VariantMatch(_)) | None => {}
+            Some(Node::Rope(rope)) => {
                 self.visit_node(rope.then, seen_nodes);
                 if let Some(miss) = rope.miss {
                     self.visit_node(miss, seen_nodes);
@@ -311,10 +311,10 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     }
 
     fn fork_off(&mut self, node_id: NodeId) -> Fork {
-        match &self[node_id] {
-            Node::Fork(fork) => fork.clone(),
-            Node::Rope(rope) => rope.clone().fork_off(self),
-            Node::VariantMatch(_) => Fork::new(Some(node_id), Some(node_id)),
+        match &self.nodes[node_id] {
+            Some(Node::Fork(fork)) => fork.clone(),
+            Some(Node::Rope(rope)) => rope.clone().fork_off(self),
+            Some(Node::VariantMatch(_)) | None => Fork::new(Some(node_id), Some(node_id)),
         }
     }
 
@@ -474,23 +474,5 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                 }
             }
         })
-    }
-}
-
-impl<'a, T: VariantMatch> Index<NodeId> for GraphBuilder<'a, T> {
-    type Output = Node<'a, T>;
-
-    fn index(&self, index: NodeId) -> &Self::Output {
-        self.nodes[index]
-            .as_ref()
-            .expect("trying to access reserved node")
-    }
-}
-
-impl<'a, T: VariantMatch> IndexMut<NodeId> for GraphBuilder<'a, T> {
-    fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
-        self.nodes[index]
-            .as_mut()
-            .expect("trying to access reserved node")
     }
 }

@@ -1,5 +1,5 @@
 use crate::error::SpannedError;
-use logos_core::{Lexer, Specification, Variant};
+use logos_core::{Lexer, Specification};
 use regex_syntax::{
     hir::{Class, Dot, Hir, HirKind},
     ParserBuilder,
@@ -11,8 +11,8 @@ pub(crate) struct Parser;
 impl Parser {
     pub(crate) fn parse(
         enum_type: &syn::ItemEnum,
-    ) -> Result<Lexer<&syn::Ident>, Vec<SpannedError>> {
-        let mut variants = Vec::new();
+    ) -> Result<Lexer<VariantMatch>, Vec<SpannedError>> {
+        let mut variant_matches = Vec::new();
         let mut errors = Vec::new();
 
         enum_type.variants.iter().for_each(|variant| {
@@ -26,8 +26,6 @@ impl Parser {
 
             let name = &variant.ident;
 
-            let mut specifications = Vec::new();
-
             variant.attrs.iter().for_each(|attr| {
                 let Some(ident) = attr.path().get_ident().map(|ident| ident.to_string()) else {
                     return;
@@ -35,23 +33,31 @@ impl Parser {
 
                 match ident.as_str() {
                     "token" => {
-                        specifications.push(Self::parse_token(attr).unwrap());
+                        let (specification, priority) = Self::parse_token(attr).unwrap();
+                        variant_matches.push(VariantMatch {
+                            name,
+                            specification,
+                            priority,
+                        });
                     }
                     "regex" => {
-                        specifications.push(Self::parse_regex(attr).unwrap());
+                        let (specification, priority) = Self::parse_regex(attr).unwrap();
+                        variant_matches.push(VariantMatch {
+                            name,
+                            specification,
+                            priority,
+                        });
                     }
                     _ => {}
                 }
             });
-
-            variants.push(Variant::new_multi_specification(name, specifications));
         });
 
         if !errors.is_empty() {
             return Err(errors);
         }
 
-        Ok(Lexer::new(variants).unwrap())
+        Ok(Lexer::new(variant_matches).unwrap())
     }
 
     fn parse_token(attribute: &syn::Attribute) -> Result<(Specification, usize), ()> {
@@ -119,5 +125,34 @@ impl Parser {
             },
             _ => todo!("unsupported regex syntax {:?}", hir.kind()),
         }
+    }
+}
+
+pub(crate) struct VariantMatch<'a> {
+    pub(crate) name: &'a syn::Ident,
+    pub(crate) specification: Specification,
+    pub(crate) priority: usize,
+}
+
+impl std::fmt::Debug for VariantMatch<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VariantMatch")
+            .field("name", &self.name)
+            .field("priority", &self.priority)
+            .finish()
+    }
+}
+
+impl logos_core::VariantMatch for VariantMatch<'_> {
+    fn specification(&self) -> &Specification {
+        &self.specification
+    }
+
+    fn priority(&self) -> usize {
+        self.priority
+    }
+
+    fn is_same_variant(&self, other: &Self) -> bool {
+        self.name == other.name
     }
 }

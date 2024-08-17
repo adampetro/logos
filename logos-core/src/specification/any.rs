@@ -1,5 +1,6 @@
 use crate::Specification;
 
+#[derive(PartialEq)]
 pub struct Any {
     specifications: Vec<Specification>,
 }

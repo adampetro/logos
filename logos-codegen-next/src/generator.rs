@@ -1,16 +1,17 @@
 use indexmap::IndexSet;
 use itertools::Itertools;
-use logos_core::{Fork, Graph, Node, NodeId, Rope, VariantMatch};
+use logos_core::{Fork, Graph, Node, NodeId, Rope};
 use quote::format_ident;
 use syn::parse_quote;
 
 mod graph_analysis;
+use crate::parser::VariantMatch;
 use graph_analysis::BacktrackDistanceAnalysis;
 
 pub(crate) struct Generator<'a> {
     state_idents: Vec<syn::Ident>,
     rope_lookups: IndexSet<[bool; 256]>,
-    graph: &'a Graph<&'a syn::Ident>,
+    graph: &'a Graph<'a, VariantMatch<'a>>,
     entrypoint: NodeId,
     uses_fast_loop: bool,
     backtrack_distances: BacktrackDistanceAnalysis,
@@ -19,7 +20,7 @@ pub(crate) struct Generator<'a> {
 impl<'a> Generator<'a> {
     pub(crate) fn generate(
         enum_ident: &syn::Ident,
-        graph: &'a Graph<&'a syn::Ident>,
+        graph: &'a Graph<'a, VariantMatch<'a>>,
         entrypoint: NodeId,
     ) -> syn::Item {
         let mut instance = Self {
@@ -100,7 +101,7 @@ impl<'a> Generator<'a> {
         }
     }
 
-    fn match_arm_body(&mut self, node_id: NodeId, node: &Node<&syn::Ident>) -> syn::Expr {
+    fn match_arm_body(&mut self, node_id: NodeId, node: &Node<VariantMatch>) -> syn::Expr {
         match node {
             Node::Fork(fork) => self.fork_match_arm_body(node_id, fork),
             Node::Rope(rope) => self.rope_match_arm_body(node_id, rope),
@@ -237,8 +238,8 @@ impl<'a> Generator<'a> {
         }
     }
 
-    fn variant_match_arm_body(&self, variant_match: &VariantMatch<&syn::Ident>) -> syn::Expr {
-        let ident = variant_match.variant_name();
+    fn variant_match_arm_body(&self, variant_match: &VariantMatch) -> syn::Expr {
+        let ident = variant_match.name;
         parse_quote! {
             {
                 return Some(Ok(Self::#ident));

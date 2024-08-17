@@ -1,3 +1,4 @@
+use crate::parser::VariantMatch;
 use itertools::Itertools;
 use logos_core::{Graph, Node, NodeId};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
@@ -8,7 +9,7 @@ pub(crate) struct BacktrackDistanceAnalysis {
 }
 
 impl BacktrackDistanceAnalysis {
-    pub(crate) fn new<T: Clone + PartialEq>(graph: &Graph<T>) -> Self {
+    pub(crate) fn new(graph: &Graph<VariantMatch>) -> Self {
         let mut distances = HashMap::new();
 
         graph.iter().for_each(|(node_id, node)| {
@@ -67,10 +68,10 @@ impl BacktrackDistanceAnalysis {
         Self { distances }
     }
 
-    fn distance_to_node_miss<T: Clone + PartialEq>(
+    fn distance_to_node_miss(
         node_id: NodeId,
         target_miss: NodeId,
-        graph: &Graph<T>,
+        graph: &Graph<VariantMatch>,
         visited: &mut HashSet<NodeId>,
     ) -> HashSet<usize> {
         if !visited.insert(node_id) {

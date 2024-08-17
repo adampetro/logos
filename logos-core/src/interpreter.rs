@@ -2,23 +2,23 @@ mod token;
 
 use crate::{
     graph::{Graph, Node, NodeId},
-    Lexer,
+    Lexer, SimpleVariantMatch,
 };
 use std::collections::HashMap;
 pub use token::Token;
 
 #[derive(Debug)]
-pub struct Interpreter<'a, T: Clone + PartialEq> {
-    graph: Graph<T>,
+pub struct Interpreter<'a> {
+    graph: Graph<'a, SimpleVariantMatch<'a>>,
     start_node_id: NodeId,
     bytes: &'a [u8],
     current_idx: usize,
     backtrack_idxs: HashMap<NodeId, usize>,
 }
 
-impl<'a, T: Clone + PartialEq> Interpreter<'a, T> {
-    pub fn new(lexer: Lexer<T>, bytes: &'a [u8]) -> Self {
-        let (graph, start_node_id) = Graph::for_lexer(&lexer);
+impl<'a> Interpreter<'a> {
+    pub fn new(lexer: &'a Lexer<SimpleVariantMatch<'a>>, bytes: &'a [u8]) -> Self {
+        let (graph, start_node_id) = Graph::for_lexer(lexer);
         Self {
             graph,
             start_node_id,
@@ -29,8 +29,8 @@ impl<'a, T: Clone + PartialEq> Interpreter<'a, T> {
     }
 }
 
-impl<'a, T: Clone + PartialEq> Iterator for Interpreter<'a, T> {
-    type Item = Result<Token<'a, T>, ()>;
+impl<'a> Iterator for Interpreter<'a> {
+    type Item = Result<Token<'a>, ()>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.current_idx >= self.bytes.len() {
@@ -72,10 +72,8 @@ impl<'a, T: Clone + PartialEq> Iterator for Interpreter<'a, T> {
                     }
                 }
                 Node::VariantMatch(variant_match) => {
-                    let token = Token::new(
-                        variant_match.variant_name.to_owned(),
-                        &self.bytes[self.current_idx..idx],
-                    );
+                    let token =
+                        Token::new(variant_match.name(), &self.bytes[self.current_idx..idx]);
                     self.current_idx = idx;
                     return Some(Ok(token));
                 }

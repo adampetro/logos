@@ -1,23 +1,23 @@
 use logos_core::{
     interpreter::{Interpreter, Token},
-    Lexer, Specification, Variant,
+    Lexer, SimpleVariantMatch, Specification,
 };
 
 #[test]
 fn test_interpreter() {
     let lexer = Lexer::new(vec![
-        Variant::new("a", Specification::Byte(b'a'), None),
-        Variant::new("b", Specification::Byte(b'b'), None),
-        Variant::new("c", Specification::Byte(b'c'), None),
-        Variant::new("d", Specification::Byte(b'd'), None),
-        Variant::new("e", Specification::Byte(b'e'), None),
-        Variant::new("f", Specification::Byte(b'f'), None),
-        Variant::new(
+        SimpleVariantMatch::new("a", Specification::Byte(b'a'), None),
+        SimpleVariantMatch::new("b", Specification::Byte(b'b'), None),
+        SimpleVariantMatch::new("c", Specification::Byte(b'c'), None),
+        SimpleVariantMatch::new("d", Specification::Byte(b'd'), None),
+        SimpleVariantMatch::new("e", Specification::Byte(b'e'), None),
+        SimpleVariantMatch::new("f", Specification::Byte(b'f'), None),
+        SimpleVariantMatch::new(
             "def",
             Specification::new_loop(3, None, Specification::new_str_sequence("def")),
             None,
         ),
-        Variant::new(
+        SimpleVariantMatch::new(
             "number",
             Specification::new_sequence(vec![
                 Specification::new_any(vec![
@@ -43,12 +43,12 @@ fn test_interpreter() {
     ])
     .unwrap();
 
-    let interpreter = Interpreter::new(lexer, b"abcdefdef1234.567");
+    let interpreter = Interpreter::new(&lexer, b"abcdefdef1234.567");
 
     dbg!(&interpreter);
 
     assert_eq!(
-        interpreter.collect::<Result<Vec<Token<&'static str>>, ()>>(),
+        interpreter.collect::<Result<Vec<Token>, ()>>(),
         Ok(vec![
             Token::new("a", b"a"),
             Token::new("b", b"b"),
@@ -67,7 +67,7 @@ fn test_interpreter() {
 #[test]
 fn test_logos_bug() {
     let lexer = Lexer::new(vec![
-        Variant::new(
+        SimpleVariantMatch::new(
             "composite",
             Specification::new_sequence(vec![
                 Specification::new_loop(
@@ -82,18 +82,18 @@ fn test_logos_bug() {
             ]),
             None,
         ),
-        Variant::new("d", Specification::Byte(b'd'), None),
-        Variant::new("e", Specification::Byte(b'e'), None),
-        Variant::new("f", Specification::Byte(b'f'), None),
+        SimpleVariantMatch::new("d", Specification::Byte(b'd'), None),
+        SimpleVariantMatch::new("e", Specification::Byte(b'e'), None),
+        SimpleVariantMatch::new("f", Specification::Byte(b'f'), None),
     ])
     .unwrap();
 
-    let interpreter = Interpreter::new(lexer, b"dedede");
+    let interpreter = Interpreter::new(&lexer, b"dedede");
 
     dbg!(&interpreter);
 
     assert_eq!(
-        interpreter.collect::<Result<Vec<Token<&'static str>>, ()>>(),
+        interpreter.collect::<Result<Vec<Token>, ()>>(),
         Ok(vec![
             Token::new("d", b"d"),
             Token::new("e", b"e"),
@@ -108,18 +108,18 @@ fn test_logos_bug() {
 #[test]
 fn test_similar_tokens() {
     let lexer = Lexer::new(vec![
-        Variant::new("a", Specification::Byte(b'a'), None),
-        Variant::new("aa", Specification::new_str_sequence("aa"), None),
-        Variant::new("aaa", Specification::new_str_sequence("aaa"), None),
+        SimpleVariantMatch::new("a", Specification::Byte(b'a'), None),
+        SimpleVariantMatch::new("aa", Specification::new_str_sequence("aa"), None),
+        SimpleVariantMatch::new("aaa", Specification::new_str_sequence("aaa"), None),
     ])
     .unwrap();
 
-    let interpreter = Interpreter::new(lexer, b"aaaa");
+    let interpreter = Interpreter::new(&lexer, b"aaaa");
 
     dbg!(&interpreter);
 
     assert_eq!(
-        interpreter.collect::<Result<Vec<Token<&'static str>>, ()>>(),
+        interpreter.collect::<Result<Vec<Token>, ()>>(),
         Ok(vec![Token::new("aaa", b"aaa"), Token::new("a", b"a"),]),
     );
 }
@@ -127,7 +127,7 @@ fn test_similar_tokens() {
 #[test]
 fn test_json() {
     let lexer = Lexer::new(vec![
-        Variant::new(
+        SimpleVariantMatch::new(
             "boolean",
             Specification::new_any(vec![
                 Specification::new_str_sequence("true"),
@@ -135,14 +135,14 @@ fn test_json() {
             ]),
             None,
         ),
-        Variant::new("open_brace", Specification::Byte(b'{'), None),
-        Variant::new("close_brace", Specification::Byte(b'}'), None),
-        Variant::new("open_bracket", Specification::Byte(b'['), None),
-        Variant::new("close_bracket", Specification::Byte(b']'), None),
-        Variant::new("colon", Specification::Byte(b':'), None),
-        Variant::new("comma", Specification::Byte(b','), None),
-        Variant::new("null", Specification::new_str_sequence("null"), None),
-        Variant::new(
+        SimpleVariantMatch::new("open_brace", Specification::Byte(b'{'), None),
+        SimpleVariantMatch::new("close_brace", Specification::Byte(b'}'), None),
+        SimpleVariantMatch::new("open_bracket", Specification::Byte(b'['), None),
+        SimpleVariantMatch::new("close_bracket", Specification::Byte(b']'), None),
+        SimpleVariantMatch::new("colon", Specification::Byte(b':'), None),
+        SimpleVariantMatch::new("comma", Specification::Byte(b','), None),
+        SimpleVariantMatch::new("null", Specification::new_str_sequence("null"), None),
+        SimpleVariantMatch::new(
             "number",
             Specification::new_sequence(vec![
                 Specification::new_loop(0, Some(1), Specification::Byte(b'-')),
@@ -185,7 +185,7 @@ fn test_json() {
             ]),
             None,
         ),
-        Variant::new(
+        SimpleVariantMatch::new(
             "string",
             Specification::new_sequence(vec![
                 Specification::Byte(b'"'),
@@ -221,7 +221,7 @@ fn test_json() {
             ]),
             None,
         ),
-        Variant::new(
+        SimpleVariantMatch::new(
             "ignored",
             Specification::new_loop(
                 1,
@@ -238,12 +238,12 @@ fn test_json() {
     ])
     .unwrap();
 
-    let interpreter = Interpreter::new(lexer, b"truefalse{}[]:,null3.14159e0\"string\"");
+    let interpreter = Interpreter::new(&lexer, b"truefalse{}[]:,null3.14159e0\"string\"");
 
     dbg!(&interpreter);
 
     assert_eq!(
-        interpreter.collect::<Result<Vec<Token<&'static str>>, ()>>(),
+        interpreter.collect::<Result<Vec<Token>, ()>>(),
         Ok(vec![
             Token::new("boolean", b"true"),
             Token::new("boolean", b"false"),

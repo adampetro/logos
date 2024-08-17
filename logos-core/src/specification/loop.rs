@@ -1,5 +1,6 @@
 use crate::Specification;
 
+#[derive(PartialEq)]
 pub struct Loop {
     min: usize,
     max: Option<usize>,

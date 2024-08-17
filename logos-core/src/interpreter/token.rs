@@ -1,11 +1,11 @@
 #[derive(Debug, PartialEq)]
-pub struct Token<'a, T> {
-    kind: T,
+pub struct Token<'a> {
+    name: &'a str,
     value: &'a [u8],
 }
 
-impl<'a, T> Token<'a, T> {
-    pub fn new(kind: T, value: &'a [u8]) -> Self {
-        Self { kind, value }
+impl<'a> Token<'a> {
+    pub fn new(name: &'a str, value: &'a [u8]) -> Self {
+        Self { name, value }
     }
 }

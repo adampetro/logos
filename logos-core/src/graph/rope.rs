@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use crate::graph::arena::HasNodeIds;
 use crate::graph::{Fork, Graph, NodeId};
 use crate::specification::{Sequence, Specification};
+use crate::VariantMatch;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rope {
@@ -39,7 +40,7 @@ impl Rope {
             })
     }
 
-    pub(crate) fn fork_off<T: Clone + PartialEq>(self, graph: &mut Graph<T>) -> Fork {
+    pub(crate) fn fork_off<T: VariantMatch>(self, graph: &mut Graph<T>) -> Fork {
         let Self {
             mut pattern,
             then,

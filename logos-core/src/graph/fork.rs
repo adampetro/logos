@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use crate::graph::arena::HasNodeIds;
 use crate::graph::{Graph, Node, NodeId};
 use crate::specification::Any;
+use crate::VariantMatch;
 
 pub const LOOKUP_TABLE_SIZE: usize = 256;
 
@@ -42,7 +43,7 @@ impl Fork {
             })
     }
 
-    pub(crate) fn merge<T: Clone + PartialEq>(&mut self, other: Fork, graph: &mut Graph<T>) {
+    pub(crate) fn merge<T: VariantMatch>(&mut self, other: Fork, graph: &mut Graph<T>) {
         (0..LOOKUP_TABLE_SIZE).for_each(|idx| {
             let other_to = other.lookup_table[idx];
             let to = self.lookup_table[idx];

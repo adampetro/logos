@@ -2,34 +2,32 @@ mod arena;
 mod fork;
 mod node;
 mod rope;
-mod variant_match;
 
 use std::{
     collections::{HashMap, HashSet},
     ops::{Index, IndexMut},
 };
 
-use crate::{Lexer, Specification};
+use crate::{Lexer, Specification, VariantMatch};
 use arena::Arena;
 pub use arena::NodeId;
 pub use fork::Fork;
 use itertools::Itertools;
 pub use node::Node;
 pub use rope::Rope;
-pub use variant_match::VariantMatch;
 
 #[derive(Debug)]
 struct ReservedId(NodeId);
 
 #[derive(Debug)]
-pub struct Graph<T: Clone + PartialEq> {
-    nodes: Arena<Option<Node<T>>>,
+pub struct Graph<'a, T: VariantMatch> {
+    nodes: Arena<Option<Node<'a, T>>>,
     merges: HashMap<[NodeId; 2], NodeId>,
     clones_with_miss: HashMap<(NodeId, NodeId), NodeId>,
 }
 
-impl<T: Clone + PartialEq> Graph<T> {
-    pub fn for_lexer(lexer: &Lexer<T>) -> (Self, NodeId) {
+impl<'a, T: VariantMatch> Graph<'a, T> {
+    pub fn for_lexer(lexer: &'a Lexer<T>) -> (Self, NodeId) {
         let mut instance = Self {
             nodes: Arena::default(),
             merges: Default::default(),
@@ -38,27 +36,13 @@ impl<T: Clone + PartialEq> Graph<T> {
         let mut start_fork = Fork::new(None, None);
 
         // sort variants by decreasing priority
-        let mut variant_patterns: Vec<(&T, &Specification, usize)> = lexer
-            .variants()
-            .iter()
-            .flat_map(|variant| {
-                variant
-                    .specifications()
-                    .iter()
-                    .map(move |(specification, priority)| {
-                        (variant.name(), specification, *priority)
-                    })
-            })
-            .collect();
-        variant_patterns.sort_by_key(|(_, _, priority)| usize::MAX - priority);
+        let mut variant_matches: Vec<&'a T> = lexer.variant_matches().iter().collect();
+        variant_matches.sort_by_key(|variant_match| usize::MAX - variant_match.priority());
 
-        variant_patterns
-            .into_iter()
-            .for_each(|(name, specification, priority)| {
-                let fork_for_variant_pattern =
-                    instance.fork_for_variant_pattern(name, specification, priority);
-                start_fork.merge(fork_for_variant_pattern, &mut instance);
-            });
+        variant_matches.into_iter().for_each(|variant_match| {
+            let fork_for_variant_match = instance.fork_for_variant_match(variant_match);
+            start_fork.merge(fork_for_variant_match, &mut instance);
+        });
 
         let start_node_id = instance.insert(start_fork);
 
@@ -69,7 +53,7 @@ impl<T: Clone + PartialEq> Graph<T> {
         (instance, start_node_id)
     }
 
-    fn insert(&mut self, node: impl Into<Node<T>>) -> NodeId {
+    fn insert(&mut self, node: impl Into<Node<'a, T>>) -> NodeId {
         let node = node.into();
 
         let existing_node_id = self
@@ -85,7 +69,7 @@ impl<T: Clone + PartialEq> Graph<T> {
         }
     }
 
-    fn insert_reserved(&mut self, reserved_id: ReservedId, node: impl Into<Node<T>>) -> NodeId {
+    fn insert_reserved(&mut self, reserved_id: ReservedId, node: impl Into<Node<'a, T>>) -> NodeId {
         self.nodes[reserved_id.0] = Some(node.into());
 
         // TODO: handle deferred merges
@@ -93,18 +77,10 @@ impl<T: Clone + PartialEq> Graph<T> {
         reserved_id.0
     }
 
-    fn fork_for_variant_pattern(
-        &mut self,
-        name: &T,
-        specification: &Specification,
-        priority: usize,
-    ) -> Fork {
-        let terminal = self.insert(VariantMatch {
-            variant_name: name.clone(),
-            priority,
-        });
+    fn fork_for_variant_match(&mut self, variant_match: &'a T) -> Fork {
+        let terminal = self.insert(variant_match);
 
-        let node = self.node_for_specification(specification, terminal, None, None);
+        let node = self.node_for_specification(variant_match.specification(), terminal, None, None);
 
         match node {
             Node::Fork(fork) => fork,
@@ -124,7 +100,7 @@ impl<T: Clone + PartialEq> Graph<T> {
         then: NodeId,
         miss: Option<NodeId>,
         record_miss_backtrack_idx: Option<NodeId>,
-    ) -> Node<T> {
+    ) -> Node<'a, T> {
         match specification {
             Specification::Byte(value) => Rope {
                 pattern: vec![HashSet::from([*value])],
@@ -448,7 +424,7 @@ impl<T: Clone + PartialEq> Graph<T> {
     }
 
     fn fork_to_rope(&mut self) {
-        self.nodes.iter_mut().for_each(|(node_id, node)| {
+        self.nodes.iter_mut().for_each(|(_, node)| {
             if let Some(Node::Fork(fork)) = node {
                 if fork.lookup_table.iter().copied().flatten().unique().count() == 1 {
                     let pattern = fork
@@ -480,8 +456,8 @@ impl<T: Clone + PartialEq> Graph<T> {
     }
 }
 
-impl<T: Clone + PartialEq> Index<NodeId> for Graph<T> {
-    type Output = Node<T>;
+impl<'a, T: VariantMatch> Index<NodeId> for Graph<'a, T> {
+    type Output = Node<'a, T>;
 
     fn index(&self, index: NodeId) -> &Self::Output {
         self.nodes[index]
@@ -490,59 +466,10 @@ impl<T: Clone + PartialEq> Index<NodeId> for Graph<T> {
     }
 }
 
-impl<T: Clone + PartialEq> IndexMut<NodeId> for Graph<T> {
+impl<'a, T: VariantMatch> IndexMut<NodeId> for Graph<'a, T> {
     fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
         self.nodes[index]
             .as_mut()
             .expect("trying to access reserved node")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Graph;
-    use crate::{Lexer, Specification, Variant};
-
-    #[test]
-    fn test_graph() {
-        let lexer = Lexer::new(vec![
-            Variant::new("foo", Specification::new_str_sequence("foo"), None),
-            // Variant::new("bar", Specification::new_str_sequence("bar"), None),
-            // Variant::new(
-            //     "number",
-            //     Specification::new_loop(1, None, Specification::ascii_digit()),
-            //     None,
-            // ),
-            // Variant::new(
-            //     "abcdefghi",
-            //     Specification::new_sequence(vec![
-            //         Specification::new_any(vec![
-            //             Specification::Byte(b'a'),
-            //             Specification::Byte(b'b'),
-            //             Specification::Byte(b'c'),
-            //         ]),
-            //         Specification::new_any(vec![
-            //             Specification::Byte(b'd'),
-            //             Specification::Byte(b'e'),
-            //             Specification::Byte(b'f'),
-            //         ]),
-            //         Specification::new_any(vec![
-            //             Specification::Byte(b'g'),
-            //             Specification::Byte(b'h'),
-            //             Specification::Byte(b'i'),
-            //         ]),
-            //     ]),
-            //     None,
-            // ),
-            Variant::new(
-                "text",
-                Specification::new_loop(1, None, Specification::ascii_alphabetic()),
-                None,
-            ),
-        ])
-        .unwrap();
-        let (graph, _) = Graph::for_lexer(&lexer);
-        dbg!(&graph);
-        assert_eq!(graph.iter().count(), 0);
     }
 }

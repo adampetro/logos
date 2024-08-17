@@ -6,7 +6,7 @@ pub use any::Any;
 pub use r#loop::Loop;
 pub use sequence::Sequence;
 
-#[derive(enum_as_inner::EnumAsInner)]
+#[derive(enum_as_inner::EnumAsInner, PartialEq)]
 pub enum Specification {
     Sequence(Sequence),
     Any(Any),

@@ -6,11 +6,10 @@ use logos_core::{
 #[test]
 fn test_equal_priority_overlap_error() {
     let lexer = Lexer::new(vec![
-        SimpleVariantMatch::new("a", Specification::Byte(b'a'), Some(2)),
-        SimpleVariantMatch::new(
-            "text",
+        (Specification::Byte(b'a'), SimpleVariantMatch::new("a", 2)),
+        (
             Specification::new_loop(1, None, Specification::ascii_alphabetic()),
-            Some(2),
+            SimpleVariantMatch::new("text", 2),
         ),
     ])
     .unwrap();
@@ -20,8 +19,8 @@ fn test_equal_priority_overlap_error() {
     assert_eq!(
         errors,
         vec![Error::VariantMatchesOverlapWithSamePriority(
-            &lexer.variant_matches()[0],
-            &lexer.variant_matches()[1]
+            &lexer.variant_matches()[0].1,
+            &lexer.variant_matches()[1].1
         )],
     );
 }

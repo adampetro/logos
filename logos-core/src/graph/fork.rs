@@ -169,13 +169,13 @@ impl HasNodeIds for Fork {
 #[cfg(test)]
 mod tests {
     use super::{Fork, GraphBuilder};
-    use crate::{SimpleVariantMatch, Specification};
+    use crate::SimpleVariantMatch;
 
     #[test]
     fn test_simple_merge() {
         let mut graph_builder = GraphBuilder::new();
-        let leaf1 = SimpleVariantMatch::new("a", Specification::Byte(b'a'), None);
-        let leaf2 = SimpleVariantMatch::new("b", Specification::Byte(b'b'), None);
+        let leaf1 = SimpleVariantMatch::new("a", 2);
+        let leaf2 = SimpleVariantMatch::new("b", 2);
         let leaf1_id = graph_builder.insert(&leaf1);
         let leaf2_id = graph_builder.insert(&leaf2);
         let mut fork1 = Fork::new();
@@ -190,9 +190,9 @@ mod tests {
     #[test]
     fn with_miss_merges_fork() {
         let mut graph_builder = GraphBuilder::new();
-        let leaf1 = SimpleVariantMatch::new("a", Specification::Byte(b'a'), None);
-        let leaf2 = SimpleVariantMatch::new("b", Specification::Byte(b'b'), None);
-        let leaf3 = SimpleVariantMatch::new("c", Specification::Byte(b'c'), None);
+        let leaf1 = SimpleVariantMatch::new("a", 2);
+        let leaf2 = SimpleVariantMatch::new("b", 2);
+        let leaf3 = SimpleVariantMatch::new("c", 2);
         let leaf1_id = graph_builder.insert(&leaf1);
         let leaf2_id = graph_builder.insert(&leaf2);
         let leaf3_id = graph_builder.insert(&leaf3);

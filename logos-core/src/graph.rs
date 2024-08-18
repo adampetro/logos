@@ -117,10 +117,13 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
         reserved_id.0
     }
 
-    fn fork_for_variant_match(&mut self, variant_match: &'a T) -> Fork {
+    fn fork_for_variant_match(
+        &mut self,
+        (specification, variant_match): &'a (Specification, T),
+    ) -> Fork {
         let terminal = self.insert(variant_match);
 
-        let node = self.node_for_specification(variant_match.specification(), terminal, None);
+        let node = self.node_for_specification(specification, terminal, None);
 
         match node {
             Node::Fork(fork) => fork,
@@ -397,18 +400,17 @@ impl<'a, T: VariantMatch> Index<NodeId> for GraphBuilder<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::{Fork, GraphBuilder, Node, Rope};
-    use crate::{SimpleVariantMatch, Specification};
+    use crate::SimpleVariantMatch;
 
     #[test]
     fn test_record_miss_backtrack_idx_properly_propagated_on_fork_rope_merge() {
         let mut graph_builder = GraphBuilder::new();
-        let variant_match_a = SimpleVariantMatch::new("a", Specification::Byte(b'a'), None);
+        let variant_match_a = SimpleVariantMatch::new("a", 2);
         let variant_match_a_id = graph_builder.insert(&variant_match_a);
         let mut fork = Fork::new();
         fork.lookup_table[b'a' as usize] = Some(variant_match_a_id);
         let fork_id = graph_builder.insert(fork);
-        let variant_match_abc =
-            SimpleVariantMatch::new("abc", Specification::new_str_sequence("abc"), None);
+        let variant_match_abc = SimpleVariantMatch::new("abc", 6);
         let variant_match_abc_id = graph_builder.insert(&variant_match_abc);
         let rope = Rope::new(
             vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],

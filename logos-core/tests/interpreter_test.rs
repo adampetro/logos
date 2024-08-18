@@ -6,19 +6,17 @@ use logos_core::{
 #[test]
 fn test_interpreter() {
     let lexer = Lexer::new(vec![
-        SimpleVariantMatch::new("a", Specification::Byte(b'a'), None),
-        SimpleVariantMatch::new("b", Specification::Byte(b'b'), None),
-        SimpleVariantMatch::new("c", Specification::Byte(b'c'), None),
-        SimpleVariantMatch::new("d", Specification::Byte(b'd'), None),
-        SimpleVariantMatch::new("e", Specification::Byte(b'e'), None),
-        SimpleVariantMatch::new("f", Specification::Byte(b'f'), None),
-        SimpleVariantMatch::new(
-            "def",
+        (Specification::Byte(b'a'), SimpleVariantMatch::new("a", 1)),
+        (Specification::Byte(b'b'), SimpleVariantMatch::new("b", 1)),
+        (Specification::Byte(b'c'), SimpleVariantMatch::new("c", 1)),
+        (Specification::Byte(b'd'), SimpleVariantMatch::new("d", 1)),
+        (Specification::Byte(b'e'), SimpleVariantMatch::new("e", 1)),
+        (Specification::Byte(b'f'), SimpleVariantMatch::new("f", 1)),
+        (
             Specification::new_loop(3, None, Specification::new_str_sequence("def")),
-            None,
+            SimpleVariantMatch::new("def", 18),
         ),
-        SimpleVariantMatch::new(
-            "number",
+        (
             Specification::new_sequence(vec![
                 Specification::new_any(vec![
                     Specification::Byte(b'0'),
@@ -38,7 +36,7 @@ fn test_interpreter() {
                     ]),
                 ),
             ]),
-            None,
+            SimpleVariantMatch::new("number", 2),
         ),
     ])
     .unwrap();
@@ -67,8 +65,7 @@ fn test_interpreter() {
 #[test]
 fn test_logos_bug() {
     let lexer = Lexer::new(vec![
-        SimpleVariantMatch::new(
-            "composite",
+        (
             Specification::new_sequence(vec![
                 Specification::new_loop(
                     1,
@@ -80,11 +77,11 @@ fn test_logos_bug() {
                 ),
                 Specification::Byte(b'f'),
             ]),
-            None,
+            SimpleVariantMatch::new("composite", 6),
         ),
-        SimpleVariantMatch::new("d", Specification::Byte(b'd'), None),
-        SimpleVariantMatch::new("e", Specification::Byte(b'e'), None),
-        SimpleVariantMatch::new("f", Specification::Byte(b'f'), None),
+        (Specification::Byte(b'd'), SimpleVariantMatch::new("d", 2)),
+        (Specification::Byte(b'e'), SimpleVariantMatch::new("e", 2)),
+        (Specification::Byte(b'f'), SimpleVariantMatch::new("f", 2)),
     ])
     .unwrap();
 
@@ -108,9 +105,15 @@ fn test_logos_bug() {
 #[test]
 fn test_similar_tokens() {
     let lexer = Lexer::new(vec![
-        SimpleVariantMatch::new("a", Specification::Byte(b'a'), None),
-        SimpleVariantMatch::new("aa", Specification::new_str_sequence("aa"), None),
-        SimpleVariantMatch::new("aaa", Specification::new_str_sequence("aaa"), None),
+        (Specification::Byte(b'a'), SimpleVariantMatch::new("a", 2)),
+        (
+            Specification::new_str_sequence("aa"),
+            SimpleVariantMatch::new("aa", 4),
+        ),
+        (
+            Specification::new_str_sequence("aaa"),
+            SimpleVariantMatch::new("aaa", 6),
+        ),
     ])
     .unwrap();
 
@@ -127,23 +130,42 @@ fn test_similar_tokens() {
 #[test]
 fn test_json() {
     let lexer = Lexer::new(vec![
-        SimpleVariantMatch::new(
-            "boolean",
+        (
             Specification::new_any(vec![
                 Specification::new_str_sequence("true"),
                 Specification::new_str_sequence("false"),
             ]),
-            None,
+            SimpleVariantMatch::new("boolean", 8),
         ),
-        SimpleVariantMatch::new("open_brace", Specification::Byte(b'{'), None),
-        SimpleVariantMatch::new("close_brace", Specification::Byte(b'}'), None),
-        SimpleVariantMatch::new("open_bracket", Specification::Byte(b'['), None),
-        SimpleVariantMatch::new("close_bracket", Specification::Byte(b']'), None),
-        SimpleVariantMatch::new("colon", Specification::Byte(b':'), None),
-        SimpleVariantMatch::new("comma", Specification::Byte(b','), None),
-        SimpleVariantMatch::new("null", Specification::new_str_sequence("null"), None),
-        SimpleVariantMatch::new(
-            "number",
+        (
+            Specification::Byte(b'{'),
+            SimpleVariantMatch::new("open_brace", 2),
+        ),
+        (
+            Specification::Byte(b'}'),
+            SimpleVariantMatch::new("close_brace", 2),
+        ),
+        (
+            Specification::Byte(b'['),
+            SimpleVariantMatch::new("open_bracket", 2),
+        ),
+        (
+            Specification::Byte(b']'),
+            SimpleVariantMatch::new("close_bracket", 2),
+        ),
+        (
+            Specification::Byte(b':'),
+            SimpleVariantMatch::new("colon", 2),
+        ),
+        (
+            Specification::Byte(b','),
+            SimpleVariantMatch::new("comma", 2),
+        ),
+        (
+            Specification::new_str_sequence("null"),
+            SimpleVariantMatch::new("null", 8),
+        ),
+        (
             Specification::new_sequence(vec![
                 Specification::new_loop(0, Some(1), Specification::Byte(b'-')),
                 Specification::new_any(vec![
@@ -183,10 +205,9 @@ fn test_json() {
                     ]),
                 ),
             ]),
-            None,
+            SimpleVariantMatch::new("number", 2),
         ),
-        SimpleVariantMatch::new(
-            "string",
+        (
             Specification::new_sequence(vec![
                 Specification::Byte(b'"'),
                 Specification::new_loop(
@@ -219,10 +240,9 @@ fn test_json() {
                 ),
                 Specification::Byte(b'"'),
             ]),
-            None,
+            SimpleVariantMatch::new("string", 4),
         ),
-        SimpleVariantMatch::new(
-            "ignored",
+        (
             Specification::new_loop(
                 1,
                 None,
@@ -233,7 +253,7 @@ fn test_json() {
                     Specification::Byte(b'\n'),
                 ]),
             ),
-            None,
+            SimpleVariantMatch::new("ignored", 2),
         ),
     ])
     .unwrap();

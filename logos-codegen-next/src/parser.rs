@@ -34,19 +34,11 @@ impl Parser {
                 match ident.as_str() {
                     "token" => {
                         let (specification, priority) = Self::parse_token(attr).unwrap();
-                        variant_matches.push(VariantMatch {
-                            name,
-                            specification,
-                            priority,
-                        });
+                        variant_matches.push((specification, VariantMatch { name, priority }));
                     }
                     "regex" => {
                         let (specification, priority) = Self::parse_regex(attr).unwrap();
-                        variant_matches.push(VariantMatch {
-                            name,
-                            specification,
-                            priority,
-                        });
+                        variant_matches.push((specification, VariantMatch { name, priority }));
                     }
                     _ => {}
                 }
@@ -128,27 +120,13 @@ impl Parser {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct VariantMatch<'a> {
     pub(crate) name: &'a syn::Ident,
-    pub(crate) specification: Specification,
     pub(crate) priority: usize,
 }
 
-impl std::fmt::Debug for VariantMatch<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VariantMatch")
-            .field("name", &self.name)
-            .field("priority", &self.priority)
-            .finish()
-    }
-}
-
 impl logos_core::VariantMatch for VariantMatch<'_> {
-    fn specification(&self) -> &Specification {
-        &self.specification
-    }
-
     fn priority(&self) -> usize {
         self.priority
     }

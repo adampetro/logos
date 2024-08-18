@@ -1,18 +1,18 @@
-use crate::VariantMatch;
+use crate::{Specification, VariantMatch};
 
 pub struct Lexer<T: VariantMatch> {
-    variant_matches: Vec<T>,
+    variant_matches: Vec<(Specification, T)>,
 }
 
 impl<T: VariantMatch> Lexer<T> {
-    pub fn new(variant_matches: Vec<T>) -> Result<Self, InvalidLexerError> {
+    pub fn new(variant_matches: Vec<(Specification, T)>) -> Result<Self, InvalidLexerError> {
         if variant_matches.is_empty() {
             return Err(InvalidLexerError::NoVariants);
         }
         Ok(Self { variant_matches })
     }
 
-    pub fn variant_matches(&self) -> &[T] {
+    pub fn variant_matches(&self) -> &[(Specification, T)] {
         &self.variant_matches
     }
 }

@@ -32,6 +32,13 @@ impl MergeKey {
     }
 }
 
+#[derive(Debug)]
+struct DeferredMerge {
+    awaiting: NodeId,
+    with: NodeId,
+    into: ReservedId,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Error<'a, T: VariantMatch> {
     VariantMatchesOverlapWithSamePriority(&'a T, &'a T),
@@ -49,11 +56,7 @@ impl<'a, T: VariantMatch> Graph<'a, T> {
     }
 
     pub fn for_lexer(lexer: &'a Lexer<T>) -> Result<Self, Vec<Error<'a, T>>> {
-        let mut builder = GraphBuilder {
-            nodes: Arena::default(),
-            merges: HashMap::new(),
-            errors: Vec::new(),
-        };
+        let mut builder = GraphBuilder::default();
         let mut start_fork = Fork::new();
 
         lexer.variant_matches().iter().for_each(|variant_match| {
@@ -95,6 +98,7 @@ pub(crate) struct GraphBuilder<'a, T: VariantMatch> {
     nodes: Arena<Option<Node<'a, T>>>,
     merges: HashMap<MergeKey, NodeId>,
     errors: Vec<Error<'a, T>>,
+    deferred_merges: Vec<DeferredMerge>,
 }
 
 impl<'a, T: VariantMatch> Default for GraphBuilder<'a, T> {
@@ -103,6 +107,7 @@ impl<'a, T: VariantMatch> Default for GraphBuilder<'a, T> {
             nodes: Arena::default(),
             merges: HashMap::new(),
             errors: Vec::new(),
+            deferred_merges: Vec::new(),
         }
     }
 }
@@ -127,7 +132,22 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     fn insert_reserved(&mut self, reserved_id: ReservedId, node: impl Into<Node<'a, T>>) -> NodeId {
         self.nodes[reserved_id.0] = Some(node.into());
 
-        // TODO: handle deferred merges
+        let (related, unrelated) = self
+            .deferred_merges
+            .drain(..)
+            .partition::<Vec<_>, _>(|merge| merge.awaiting == reserved_id.0);
+
+        self.deferred_merges = unrelated;
+
+        related.into_iter().for_each(
+            |DeferredMerge {
+                 awaiting,
+                 with,
+                 into,
+             }| {
+                self.merge_unchecked(awaiting, with, into);
+            },
+        );
 
         reserved_id.0
     }
@@ -325,51 +345,101 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
         }
     }
 
-    pub(crate) fn merge(&mut self, from_id: NodeId, to_id: NodeId) -> NodeId {
-        let key = MergeKey::new(from_id, to_id);
+    pub(crate) fn merge(&mut self, a: NodeId, b: NodeId) -> NodeId {
+        if a == b {
+            return a;
+        }
+
+        let key = MergeKey::new(a, b);
         if let Some(node_id) = self.merges.get(&key) {
             return *node_id;
         }
 
-        let from = &self.nodes[from_id];
-        let to = &self.nodes[to_id];
+        let node_a = &self.nodes[a];
+        let node_b = &self.nodes[b];
 
-        match (from, to) {
-            (Some(Node::VariantMatch(from)), Some(Node::VariantMatch(to))) => {
-                let merge_id = if from == to {
-                    to_id
-                } else if from.priority() == to.priority() {
+        match (node_a, node_b) {
+            (
+                Some(Node::VariantMatch(variant_match_a)),
+                Some(Node::VariantMatch(variant_match_b)),
+            ) => {
+                let merge_id = if variant_match_a == variant_match_b {
+                    b
+                } else if variant_match_a.priority() == variant_match_b.priority() {
                     self.errors
-                        .push(Error::VariantMatchesOverlapWithSamePriority(from, to));
-                    to_id
-                } else if from.priority() > to.priority() {
-                    from_id
+                        .push(Error::VariantMatchesOverlapWithSamePriority(
+                            variant_match_a,
+                            variant_match_b,
+                        ));
+                    b
+                } else if variant_match_a.priority() > variant_match_b.priority() {
+                    a
                 } else {
-                    to_id
+                    b
                 };
-                self.set_merged(from_id, to_id, merge_id);
+                self.set_merged(a, b, merge_id);
 
                 merge_id
             }
-            (Some(_), Some(_)) => {
-                let reserved_id = self.reserve();
-                self.set_merged(from_id, to_id, reserved_id.0);
-                let from_fork = self.fork_off(from_id);
-                let mut to_fork = self.fork_off(to_id);
-                to_fork.merge(from_fork, self);
-                self.insert_reserved(reserved_id, to_fork)
+            (None, None) => {
+                panic!(
+                    "Merging two reserved nodes! This is a bug, please report it:\n\
+                    \n\
+                    https://github.com/maciejhirsz/logos/issues"
+                );
             }
-            (None, Some(_)) | (Some(_), None) | (None, None) => {
-                todo!("Deferred merge not yet implemented")
+            (None, Some(_)) => {
+                let reserved = self.reserve();
+                let merge_id = reserved.0;
+                self.set_merged(a, b, merge_id);
+                self.deferred_merges.push(DeferredMerge {
+                    awaiting: a,
+                    with: b,
+                    into: reserved,
+                });
+                merge_id
+            }
+            (Some(_), None) => {
+                let reserved = self.reserve();
+                let merge_id = reserved.0;
+                self.set_merged(a, b, merge_id);
+                self.deferred_merges.push(DeferredMerge {
+                    awaiting: b,
+                    with: a,
+                    into: reserved,
+                });
+                merge_id
+            }
+            (Some(_), Some(_)) => {
+                let reserved = self.reserve();
+                let merge_id = reserved.0;
+                self.set_merged(a, b, merge_id);
+                self.merge_unchecked(a, b, reserved)
             }
         }
     }
 
-    fn set_merged(&mut self, from_id: NodeId, to_id: NodeId, merge_id: NodeId) {
-        self.merges.insert(MergeKey::new(from_id, to_id), merge_id);
-        self.merges.insert(MergeKey::new(to_id, merge_id), merge_id);
-        self.merges
-            .insert(MergeKey::new(from_id, merge_id), merge_id);
+    fn merge_unchecked(&mut self, a: NodeId, b: NodeId, reserved: ReservedId) -> NodeId {
+        let (Some(node_a), Some(node_b)) = (&self.nodes[a], &self.nodes[b]) else {
+            panic!(
+                "Merging unchecked with one or more reserved nodes! This is a bug, please report it:\n\
+                \n\
+                https://github.com/maciejhirsz/logos/issues"
+            );
+        };
+
+        dbg!(a, node_a, b, node_b);
+
+        let fork_a = self.fork_off(a);
+        let mut fork_b = self.fork_off(b);
+        fork_b.merge(fork_a, self);
+        self.insert_reserved(reserved, fork_b)
+    }
+
+    fn set_merged(&mut self, a: NodeId, b: NodeId, merge_id: NodeId) {
+        self.merges.insert(MergeKey::new(a, b), merge_id);
+        self.merges.insert(MergeKey::new(b, merge_id), merge_id);
+        self.merges.insert(MergeKey::new(a, merge_id), merge_id);
     }
 
     fn reserve(&mut self) -> ReservedId {

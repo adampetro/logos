@@ -87,28 +87,6 @@ impl Fork {
             (None, Some(other_miss)) => Some(other_miss),
             (self_miss, None) => self_miss,
         };
-        (0..LOOKUP_TABLE_SIZE).for_each(|idx| {
-            let other_to = other.lookup_table[idx];
-            let to = self.lookup_table[idx];
-
-            let new_to = match (other_to, to) {
-                (None, None) => None,
-                (Some(id), None) => Some(id),
-                (None, Some(id)) => Some(id),
-                (Some(from_id), Some(to_id)) => Some(graph_builder.merge(from_id, to_id)),
-            }
-            .map(|new_to| {
-                if let Some(miss) = self.miss {
-                    let miss_fork = Fork::new().with_miss(Some((miss, false)), graph_builder);
-                    let miss_fork_id = graph_builder.insert(miss_fork);
-                    graph_builder.merge(miss_fork_id, new_to)
-                } else {
-                    new_to
-                }
-            });
-
-            self.lookup_table[idx] = new_to;
-        });
         self.record_miss_backtrack_idx = match (
             self.record_miss_backtrack_idx,
             other.record_miss_backtrack_idx,
@@ -119,6 +97,49 @@ impl Fork {
             (None, Some(other_node_id)) => Some(other_node_id),
             (self_node_id, None) => self_node_id,
         };
+        let miss_fork_id = self.miss.map(|miss| {
+            let miss_fork = Fork::new().with_miss(Some((miss, false)), graph_builder);
+            graph_builder.insert(miss_fork)
+        });
+        self.lookup_table
+            .iter_mut()
+            .zip(other.lookup_table.iter())
+            .for_each(|(to, other_to)| {
+                let new_to = match (*other_to, *to) {
+                    (None, None) => None,
+                    (Some(id), None) => Some(id),
+                    (None, Some(id)) => Some(id),
+                    (Some(self_id), Some(other_id)) => Some(graph_builder.merge(self_id, other_id)),
+                }
+                .map(|new_to| {
+                    if let Some(miss_fork_id) = miss_fork_id {
+                        let merge_id = graph_builder.merge(miss_fork_id, new_to);
+                        match &graph_builder[merge_id] {
+                            Some(Node::Fork(fork)) => fork.flatten_to_miss().unwrap_or(merge_id),
+                            _ => merge_id,
+                        }
+                    } else {
+                        new_to
+                    }
+                });
+
+                *to = new_to;
+            });
+    }
+
+    fn flatten_to_miss(&self) -> Option<NodeId> {
+        match self.miss {
+            Some(miss)
+                if self.lookup_table_is_empty() && self.record_miss_backtrack_idx == self.miss =>
+            {
+                Some(miss)
+            }
+            _ => None,
+        }
+    }
+
+    fn lookup_table_is_empty(&self) -> bool {
+        self.lookup_table.iter().all(Option::is_none)
     }
 
     pub fn lookup_table(&self) -> &[Option<NodeId>; 256] {

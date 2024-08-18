@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn test_simple_merge() {
-        let mut graph_builder = GraphBuilder::new();
+        let mut graph_builder = GraphBuilder::default();
         let leaf1 = SimpleVariantMatch::new("a", 2);
         let leaf2 = SimpleVariantMatch::new("b", 2);
         let leaf1_id = graph_builder.insert(&leaf1);
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn with_miss_merges_fork() {
-        let mut graph_builder = GraphBuilder::new();
+        let mut graph_builder = GraphBuilder::default();
         let leaf1 = SimpleVariantMatch::new("a", 2);
         let leaf2 = SimpleVariantMatch::new("b", 2);
         let leaf3 = SimpleVariantMatch::new("c", 2);

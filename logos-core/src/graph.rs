@@ -84,15 +84,17 @@ pub(crate) struct GraphBuilder<'a, T: VariantMatch> {
     errors: Vec<Error<'a, T>>,
 }
 
-impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
-    pub(crate) fn new() -> Self {
+impl<'a, T: VariantMatch> Default for GraphBuilder<'a, T> {
+    fn default() -> Self {
         Self {
             nodes: Arena::default(),
             merges: HashMap::new(),
             errors: Vec::new(),
         }
     }
+}
 
+impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     fn insert(&mut self, node: impl Into<Node<'a, T>>) -> NodeId {
         let node = node.into();
 
@@ -404,7 +406,7 @@ mod tests {
 
     #[test]
     fn test_record_miss_backtrack_idx_properly_propagated_on_fork_rope_merge() {
-        let mut graph_builder = GraphBuilder::new();
+        let mut graph_builder = GraphBuilder::default();
         let variant_match_a = SimpleVariantMatch::new("a", 2);
         let variant_match_a_id = graph_builder.insert(&variant_match_a);
         let mut fork = Fork::new();

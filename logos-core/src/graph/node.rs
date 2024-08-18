@@ -1,4 +1,4 @@
-use crate::graph::{arena::HasNodeIds, Fork, GraphBuilder, NodeId, Rope};
+use crate::graph::{arena::HasNodeIds, Fork, NodeId, Rope};
 use crate::VariantMatch;
 
 #[derive(Debug, PartialEq)]
@@ -32,32 +32,6 @@ impl<T: VariantMatch> HasNodeIds for Node<'_, T> {
             Self::Fork(fork) => fork.update_node_ids(f),
             Self::VariantMatch(_) => {}
             Self::Rope(rope) => rope.update_node_ids(f),
-        }
-    }
-}
-
-impl<'a, T: VariantMatch> Node<'a, T> {
-    pub(crate) fn record_miss_backtrack_idx(&self) -> Option<NodeId> {
-        match self {
-            Self::Fork(fork) => fork.record_miss_backtrack_idx(),
-            Self::VariantMatch(_) => None,
-            Self::Rope(rope) => rope.record_miss_backtrack_idx(),
-        }
-    }
-
-    pub(crate) fn with_miss(
-        self,
-        node_id_and_record_miss_backtrack_idx: impl Into<Option<(NodeId, bool)>>,
-        graph_builder: &mut GraphBuilder<'a, T>,
-    ) -> Self {
-        match self {
-            Self::VariantMatch(_) => panic!("Cannot set miss on VariantMatch"),
-            Self::Fork(fork) => fork
-                .with_miss(node_id_and_record_miss_backtrack_idx, graph_builder)
-                .into(),
-            Self::Rope(rope) => {
-                rope.with_miss(node_id_and_record_miss_backtrack_idx, graph_builder)
-            }
         }
     }
 }

@@ -19,6 +19,19 @@ pub use rope::Rope;
 #[derive(Debug)]
 struct ReservedId(NodeId);
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct MergeKey(NodeId, NodeId);
+
+impl MergeKey {
+    fn new(a: NodeId, b: NodeId) -> Self {
+        if a < b {
+            Self(a, b)
+        } else {
+            Self(b, a)
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Error<'a, T: VariantMatch> {
     VariantMatchesOverlapWithSamePriority(&'a T, &'a T),
@@ -80,7 +93,7 @@ impl<'a, T: VariantMatch> Index<NodeId> for Graph<'a, T> {
 #[derive(Debug)]
 pub(crate) struct GraphBuilder<'a, T: VariantMatch> {
     nodes: Arena<Option<Node<'a, T>>>,
-    merges: HashMap<[NodeId; 2], NodeId>,
+    merges: HashMap<MergeKey, NodeId>,
     errors: Vec<Error<'a, T>>,
 }
 
@@ -313,8 +326,7 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     }
 
     pub(crate) fn merge(&mut self, from_id: NodeId, to_id: NodeId) -> NodeId {
-        let mut key = [from_id, to_id];
-        key.sort();
+        let key = MergeKey::new(from_id, to_id);
         if let Some(node_id) = self.merges.get(&key) {
             return *node_id;
         }
@@ -354,15 +366,10 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     }
 
     fn set_merged(&mut self, from_id: NodeId, to_id: NodeId, merge_id: NodeId) {
-        let mut key = [from_id, to_id];
-        key.sort();
-        self.merges.insert(key, merge_id);
-        let mut key = [to_id, merge_id];
-        key.sort();
-        self.merges.insert(key, merge_id);
-        let mut key = [from_id, merge_id];
-        key.sort();
-        self.merges.insert([from_id, merge_id], merge_id);
+        self.merges.insert(MergeKey::new(from_id, to_id), merge_id);
+        self.merges.insert(MergeKey::new(to_id, merge_id), merge_id);
+        self.merges
+            .insert(MergeKey::new(from_id, merge_id), merge_id);
     }
 
     fn reserve(&mut self) -> ReservedId {

@@ -20,8 +20,8 @@ fn test_equal_priority_overlap_error() {
     assert_eq!(
         errors,
         vec![Error::VariantMatchesOverlapWithSamePriority(
-            &lexer.variant_matches()[1],
-            &lexer.variant_matches()[0]
+            &lexer.variant_matches()[0],
+            &lexer.variant_matches()[1]
         )],
     );
 }

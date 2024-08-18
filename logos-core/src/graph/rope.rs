@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Debug;
 
-use crate::graph::arena::HasNodeIds;
-use crate::graph::{Fork, GraphBuilder, NodeId};
+use crate::graph::{arena::HasNodeIds, Fork, GraphBuilder, Node, NodeId};
 use crate::specification::{Sequence, Specification};
 use crate::VariantMatch;
 
@@ -10,17 +9,21 @@ use crate::VariantMatch;
 pub struct Rope {
     pub(crate) pattern: Vec<HashSet<u8>>,
     pub(crate) then: NodeId,
-    pub(crate) miss: Option<NodeId>,
-    pub(crate) record_miss_backtrack_idx: Option<NodeId>,
+    miss: Option<NodeId>,
+    record_miss_backtrack_idx: Option<NodeId>,
 }
 
 impl Rope {
-    pub(crate) fn try_from_sequence(
-        sequence: &Sequence,
-        then: NodeId,
-        miss: Option<NodeId>,
-        record_miss_backtrack_idx: Option<NodeId>,
-    ) -> Option<Self> {
+    pub(crate) fn new(pattern: Vec<HashSet<u8>>, then: NodeId) -> Self {
+        Self {
+            pattern,
+            then,
+            miss: None,
+            record_miss_backtrack_idx: None,
+        }
+    }
+
+    pub(crate) fn try_from_sequence(sequence: &Sequence, then: NodeId) -> Option<Self> {
         sequence
             .iter()
             .map(|specification| match specification {
@@ -32,12 +35,7 @@ impl Rope {
                 _ => None,
             })
             .collect::<Option<Vec<HashSet<u8>>>>()
-            .map(|pattern| Self {
-                pattern,
-                miss,
-                then,
-                record_miss_backtrack_idx,
-            })
+            .map(|pattern| Self::new(pattern, then))
     }
 
     pub(crate) fn fork_off<T: VariantMatch>(self, graph_builder: &mut GraphBuilder<T>) -> Fork {
@@ -61,13 +59,40 @@ impl Rope {
             })
         };
 
-        let mut fork = Fork::new(miss, record_miss_backtrack_idx);
+        let mut fork = Fork::new().with_miss_unchecked(miss, record_miss_backtrack_idx);
 
         first.iter().for_each(|byte| {
             fork.lookup_table[*byte as usize] = Some(then);
         });
 
         fork
+    }
+
+    pub(crate) fn with_miss<'a, T: VariantMatch>(
+        mut self,
+        node_id_and_record_miss_backtrack_idx: impl Into<Option<(NodeId, bool)>>,
+        graph_builder: &mut GraphBuilder<T>,
+    ) -> Node<'a, T> {
+        let Some((node_id, record_miss_backtrack_idx)) =
+            node_id_and_record_miss_backtrack_idx.into()
+        else {
+            return self.into();
+        };
+        if matches!(&graph_builder[node_id], Some(Node::VariantMatch(_))) {
+            self.miss = Some(node_id);
+            self.record_miss_backtrack_idx = record_miss_backtrack_idx.then_some(node_id);
+            self.into()
+        } else {
+            self.fork_off(graph_builder)
+                .with_miss(Some((node_id, record_miss_backtrack_idx)), graph_builder)
+                .into()
+        }
+    }
+
+    pub(crate) fn with_fork_miss(mut self, fork: &Fork) -> Self {
+        self.miss = fork.miss();
+        self.record_miss_backtrack_idx = fork.record_miss_backtrack_idx();
+        self
     }
 
     pub fn pattern(&self) -> &[HashSet<u8>] {

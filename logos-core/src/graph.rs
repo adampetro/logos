@@ -39,16 +39,11 @@ impl<'a, T: VariantMatch> Graph<'a, T> {
         let mut builder = GraphBuilder {
             nodes: Arena::default(),
             merges: HashMap::new(),
-            clones_with_miss: HashMap::new(),
             errors: Vec::new(),
         };
-        let mut start_fork = Fork::new(None, None);
+        let mut start_fork = Fork::new();
 
-        // sort variants by decreasing priority
-        let mut variant_matches: Vec<&'a T> = lexer.variant_matches().iter().collect();
-        variant_matches.sort_by_key(|variant_match| usize::MAX - variant_match.priority());
-
-        variant_matches.into_iter().for_each(|variant_match| {
+        lexer.variant_matches().iter().for_each(|variant_match| {
             let fork_for_variant_match = builder.fork_for_variant_match(variant_match);
             start_fork.merge(fork_for_variant_match, &mut builder);
         });
@@ -83,14 +78,21 @@ impl<'a, T: VariantMatch> Index<NodeId> for Graph<'a, T> {
 }
 
 #[derive(Debug)]
-pub struct GraphBuilder<'a, T: VariantMatch> {
+pub(crate) struct GraphBuilder<'a, T: VariantMatch> {
     nodes: Arena<Option<Node<'a, T>>>,
     merges: HashMap<[NodeId; 2], NodeId>,
-    clones_with_miss: HashMap<(NodeId, NodeId), NodeId>,
     errors: Vec<Error<'a, T>>,
 }
 
 impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
+    pub(crate) fn new() -> Self {
+        Self {
+            nodes: Arena::default(),
+            merges: HashMap::new(),
+            errors: Vec::new(),
+        }
+    }
+
     fn insert(&mut self, node: impl Into<Node<'a, T>>) -> NodeId {
         let node = node.into();
 
@@ -118,12 +120,12 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     fn fork_for_variant_match(&mut self, variant_match: &'a T) -> Fork {
         let terminal = self.insert(variant_match);
 
-        let node = self.node_for_specification(variant_match.specification(), terminal, None, None);
+        let node = self.node_for_specification(variant_match.specification(), terminal, None);
 
         match node {
             Node::Fork(fork) => fork,
             Node::Rope(rope) => {
-                let mut fork = Fork::new(None, None);
+                let mut fork = Fork::new();
                 let f = rope.fork_off(self);
                 fork.merge(f, self);
                 fork
@@ -136,93 +138,78 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
         &mut self,
         specification: &Specification,
         then: NodeId,
-        miss: Option<NodeId>,
-        record_miss_backtrack_idx: Option<NodeId>,
+        miss: Option<(NodeId, bool)>,
     ) -> Node<'a, T> {
         match specification {
-            Specification::Byte(value) => Rope {
-                pattern: vec![HashSet::from([*value])],
-                then,
-                miss,
-                record_miss_backtrack_idx,
+            Specification::Byte(value) => {
+                Rope::new(vec![HashSet::from([*value])], then).with_miss(miss, self)
             }
-            .into(),
-            Specification::Any(any) => {
-                Fork::try_from_any(any, then, miss, record_miss_backtrack_idx)
-                    .map(Node::from)
-                    .unwrap_or_else(|| {
-                        let mut fork = Fork::new(miss, record_miss_backtrack_idx);
+            Specification::Any(any) => Fork::try_from_any(any, then)
+                .map(|fork| Node::from(fork.with_miss(miss, self)))
+                .unwrap_or_else(|| {
+                    let mut fork = Fork::new().with_miss(miss, self);
 
-                        any.iter().for_each(|specification| {
-                            let node = self.node_for_specification(specification, then, miss, None);
-                            match node {
-                                Node::Fork(f) => fork.merge(f, self),
-                                Node::Rope(rope) => {
-                                    let f = rope.fork_off(self);
-                                    fork.merge(f, self);
-                                }
-                                Node::VariantMatch(_) => {
-                                    unreachable!("variant match implies an empty specification")
-                                }
+                    any.iter().for_each(|specification| {
+                        let node = self.node_for_specification(specification, then, miss);
+                        match node {
+                            Node::Fork(f) => fork.merge(f, self),
+                            Node::Rope(rope) => {
+                                let f = rope.fork_off(self);
+                                fork.merge(f, self);
                             }
-                        });
+                            Node::VariantMatch(_) => {
+                                unreachable!("variant match implies an empty specification")
+                            }
+                        }
+                    });
 
-                        fork.into()
-                    })
-            }
-            Specification::Sequence(sequence) => {
-                Rope::try_from_sequence(sequence, then, miss, record_miss_backtrack_idx)
-                    .map(Node::from)
-                    .unwrap_or_else(|| {
-                        let sequence_length = sequence.len();
-                        let mut reverse_iterator =
-                            sequence
-                                .iter()
-                                .rev()
-                                .enumerate()
-                                .map(|(idx, specification)| {
-                                    ((idx + 1 == sequence_length), specification)
-                                });
-                        let (is_last, specification) = reverse_iterator.next().unwrap();
-                        let then_node = self.node_for_specification(
+                    fork.into()
+                }),
+            Specification::Sequence(sequence) => Rope::try_from_sequence(sequence, then)
+                .map(|rope| rope.with_miss(miss, self))
+                .unwrap_or_else(|| {
+                    let sequence_length = sequence.len();
+                    let mut reverse_iterator = sequence
+                        .iter()
+                        .rev()
+                        .enumerate()
+                        .map(|(idx, specification)| ((idx + 1 == sequence_length), specification));
+                    let (is_last, specification) = reverse_iterator.next().unwrap();
+                    let then_node = self.node_for_specification(
+                        specification,
+                        then,
+                        miss.map(|(node_id, record_miss_backtrack_idx)| {
+                            (node_id, record_miss_backtrack_idx && is_last)
+                        }),
+                    );
+                    reverse_iterator.fold(then_node, |then_node, (is_last, specification)| {
+                        let then = self.insert(then_node);
+                        self.node_for_specification(
                             specification,
                             then,
-                            miss,
-                            is_last.then_some(record_miss_backtrack_idx).flatten(),
-                        );
-                        reverse_iterator.fold(then_node, |then_node, (is_last, specification)| {
-                            let then = self.insert(then_node);
-                            self.node_for_specification(
-                                specification,
-                                then,
-                                miss,
-                                is_last.then_some(record_miss_backtrack_idx).flatten(),
-                            )
-                        })
+                            miss.map(|(node_id, record_miss_backtrack_idx)| {
+                                (node_id, record_miss_backtrack_idx && is_last)
+                            }),
+                        )
                     })
-            }
+                }),
             Specification::Loop(l) => {
                 if let Some(max) = l.max() {
                     let terminal = then;
                     let min = l.min();
 
-                    let last_miss = if min == max { miss } else { Some(terminal) };
+                    let last_miss = if min == max {
+                        miss.map(|(node_id, _)| (node_id, false))
+                    } else {
+                        Some((terminal, true))
+                    };
 
-                    let then_node = self.node_for_specification(
-                        l.specification(),
-                        terminal,
-                        last_miss,
-                        (min != max).then_some(terminal),
-                    );
+                    let then_node =
+                        self.node_for_specification(l.specification(), terminal, last_miss);
 
                     let then_node = (min..(max - 1)).fold(then_node, |then_node, _| {
                         let then = self.insert(then_node);
-                        self.node_for_specification(
-                            l.specification(),
-                            then,
-                            Some(terminal),
-                            Some(terminal),
-                        )
+                        self.node_for_specification(l.specification(), then, Some((terminal, true)))
                     });
 
                     (0..min).fold(then_node, |then_node, i| {
@@ -231,8 +218,9 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                         self.node_for_specification(
                             l.specification(),
                             then,
-                            miss,
-                            is_last.then_some(record_miss_backtrack_idx).flatten(),
+                            miss.map(|(node_id, record_miss_backtrack_idx)| {
+                                (node_id, record_miss_backtrack_idx && is_last)
+                            }),
                         )
                     })
                 } else {
@@ -241,8 +229,7 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                     let loop_end = self.node_for_specification(
                         l.specification(),
                         reserved_loop_back_to.0,
-                        Some(then),
-                        Some(then),
+                        Some((then, true)),
                     );
 
                     let start_id = self.insert_reserved(reserved_loop_back_to, loop_end);
@@ -250,8 +237,7 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                     let then_node = self.node_for_specification(
                         l.specification(),
                         start_id,
-                        Some(then),
-                        Some(then),
+                        Some((then, true)),
                     );
 
                     (0..l.min()).fold(then_node, |then_node, i| {
@@ -260,8 +246,9 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                         self.node_for_specification(
                             l.specification(),
                             then,
-                            miss,
-                            is_last.then_some(record_miss_backtrack_idx).flatten(),
+                            miss.map(|(node_id, record_miss_backtrack_idx)| {
+                                (node_id, record_miss_backtrack_idx && is_last)
+                            }),
                         )
                     })
                 }
@@ -290,20 +277,20 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                         self.visit_node(*node_id, seen_nodes);
                     }
                 });
-                if let Some(miss) = fork.miss {
+                if let Some(miss) = fork.miss() {
                     self.visit_node(miss, seen_nodes);
                 }
-                if let Some(record_miss_backtrack_idx) = fork.record_miss_backtrack_idx {
+                if let Some(record_miss_backtrack_idx) = fork.record_miss_backtrack_idx() {
                     self.visit_node(record_miss_backtrack_idx, seen_nodes);
                 }
             }
             Some(Node::VariantMatch(_)) | None => {}
             Some(Node::Rope(rope)) => {
                 self.visit_node(rope.then, seen_nodes);
-                if let Some(miss) = rope.miss {
+                if let Some(miss) = rope.miss() {
                     self.visit_node(miss, seen_nodes);
                 }
-                if let Some(record_miss_backtrack_idx) = rope.record_miss_backtrack_idx {
+                if let Some(record_miss_backtrack_idx) = rope.record_miss_backtrack_idx() {
                     self.visit_node(record_miss_backtrack_idx, seen_nodes);
                 }
             }
@@ -314,7 +301,9 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
         match &self.nodes[node_id] {
             Some(Node::Fork(fork)) => fork.clone(),
             Some(Node::Rope(rope)) => rope.clone().fork_off(self),
-            Some(Node::VariantMatch(_)) | None => Fork::new(Some(node_id), Some(node_id)),
+            Some(Node::VariantMatch(_)) | None => {
+                Fork::new().with_miss(Some((node_id, true)), self)
+            }
         }
     }
 
@@ -328,11 +317,9 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
         let from = &self.nodes[from_id];
         let to = &self.nodes[to_id];
 
-        dbg!(&from, &to);
-
-        let merge_id = match (from, to) {
+        match (from, to) {
             (Some(Node::VariantMatch(from)), Some(Node::VariantMatch(to))) => {
-                if from == to {
+                let merge_id = if from == to {
                     to_id
                 } else if from.priority() == to.priority() {
                     self.errors
@@ -342,21 +329,28 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                     from_id
                 } else {
                     to_id
-                }
+                };
+                self.set_merged(from_id, to_id, merge_id);
+
+                merge_id
             }
-            (_, Some(Node::VariantMatch(_))) => self.clone_with_miss(from_id, to_id, true),
-            (Some(Node::VariantMatch(_)), _) => self.clone_with_miss(to_id, from_id, true),
             (Some(_), Some(_)) => {
+                let reserved_id = self.reserve();
+                self.set_merged(from_id, to_id, reserved_id.0);
                 let from_fork = self.fork_off(from_id);
                 let mut to_fork = self.fork_off(to_id);
                 to_fork.merge(from_fork, self);
-                self.insert(to_fork)
+                self.insert_reserved(reserved_id, to_fork)
             }
             (None, Some(_)) | (Some(_), None) | (None, None) => {
                 todo!("Deferred merge not yet implemented")
             }
-        };
+        }
+    }
 
+    fn set_merged(&mut self, from_id: NodeId, to_id: NodeId, merge_id: NodeId) {
+        let mut key = [from_id, to_id];
+        key.sort();
         self.merges.insert(key, merge_id);
         let mut key = [to_id, merge_id];
         key.sort();
@@ -364,86 +358,6 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
         let mut key = [from_id, merge_id];
         key.sort();
         self.merges.insert([from_id, merge_id], merge_id);
-
-        merge_id
-    }
-
-    fn clone_with_miss(
-        &mut self,
-        node_id: NodeId,
-        miss: NodeId,
-        record_miss_backtrack_idx: bool,
-    ) -> NodeId {
-        if matches!(self.nodes[node_id], Some(Node::VariantMatch(_))) {
-            return node_id;
-        }
-
-        if matches!(&self.nodes[node_id], Some(Node::Fork(fork)) if fork.miss == Some(miss) && (!record_miss_backtrack_idx || fork.record_miss_backtrack_idx == Some(miss)))
-        {
-            return node_id;
-        }
-
-        if matches!(&self.nodes[node_id], Some(Node::Rope(rope)) if rope.miss == Some(miss) && (!record_miss_backtrack_idx || rope.record_miss_backtrack_idx == Some(miss)))
-        {
-            return node_id;
-        }
-
-        if let Some(node_id) = self.clones_with_miss.get(&(node_id, miss)) {
-            return *node_id;
-        }
-
-        let deferred = self.reserve();
-
-        self.clones_with_miss.insert((node_id, miss), deferred.0);
-
-        match &self.nodes[node_id] {
-            None => panic!("trying to clone reserved node"),
-            Some(Node::VariantMatch(_)) => unreachable!("already handled"),
-            Some(Node::Fork(fork)) => {
-                let mut fork = fork.clone();
-                if let Some(fork_miss) = fork.miss {
-                    fork.miss = Some(self.clone_with_miss(fork_miss, miss, false));
-                } else {
-                    fork.miss = Some(miss);
-                }
-                if record_miss_backtrack_idx {
-                    fork.record_miss_backtrack_idx = Some(miss);
-                } else if let Some(record_miss_backtrack_idx) = &mut fork.record_miss_backtrack_idx
-                {
-                    *record_miss_backtrack_idx = self
-                        .clones_with_miss
-                        .get(&(*record_miss_backtrack_idx, miss))
-                        .copied()
-                        .unwrap_or(*record_miss_backtrack_idx);
-                }
-                fork.lookup_table.iter_mut().for_each(|lookup_node_id| {
-                    if let Some(lookup_node_id) = lookup_node_id {
-                        *lookup_node_id = self.clone_with_miss(*lookup_node_id, miss, false);
-                    }
-                });
-                self.insert_reserved(deferred, fork)
-            }
-            Some(Node::Rope(rope)) => {
-                let mut rope = rope.clone();
-                if let Some(rope_miss) = rope.miss {
-                    rope.miss = Some(self.clone_with_miss(rope_miss, miss, false));
-                } else {
-                    rope.miss = Some(miss);
-                }
-                if record_miss_backtrack_idx {
-                    rope.record_miss_backtrack_idx = Some(miss);
-                } else if let Some(record_miss_backtrack_idx) = &mut rope.record_miss_backtrack_idx
-                {
-                    *record_miss_backtrack_idx = self
-                        .clones_with_miss
-                        .get(&(*record_miss_backtrack_idx, miss))
-                        .copied()
-                        .unwrap_or(*record_miss_backtrack_idx);
-                }
-                rope.then = self.clone_with_miss(rope.then, miss, false);
-                self.insert_reserved(deferred, rope)
-            }
-        }
     }
 
     fn reserve(&mut self) -> ReservedId {
@@ -465,14 +379,71 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                         .iter()
                         .find_map(|node_id| *node_id)
                         .unwrap();
-                    *node = Some(Node::Rope(Rope {
-                        pattern: vec![pattern],
-                        then,
-                        miss: fork.miss,
-                        record_miss_backtrack_idx: fork.record_miss_backtrack_idx,
-                    }));
+                    *node = Some(Rope::new(vec![pattern], then).with_fork_miss(fork).into());
                 }
             }
         })
+    }
+}
+
+impl<'a, T: VariantMatch> Index<NodeId> for GraphBuilder<'a, T> {
+    type Output = Option<Node<'a, T>>;
+
+    fn index(&self, index: NodeId) -> &Self::Output {
+        &self.nodes[index]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Fork, GraphBuilder, Node, Rope};
+    use crate::{SimpleVariantMatch, Specification};
+
+    #[test]
+    fn test_record_miss_backtrack_idx_properly_propagated_on_fork_rope_merge() {
+        let mut graph_builder = GraphBuilder::new();
+        let variant_match_a = SimpleVariantMatch::new("a", Specification::Byte(b'a'), None);
+        let variant_match_a_id = graph_builder.insert(&variant_match_a);
+        let mut fork = Fork::new();
+        fork.lookup_table[b'a' as usize] = Some(variant_match_a_id);
+        let fork_id = graph_builder.insert(fork);
+        let variant_match_abc =
+            SimpleVariantMatch::new("abc", Specification::new_str_sequence("abc"), None);
+        let variant_match_abc_id = graph_builder.insert(&variant_match_abc);
+        let rope = Rope::new(
+            vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
+            variant_match_abc_id,
+        );
+        let rope_id = graph_builder.insert(rope);
+        let merged_id = graph_builder.merge(fork_id, rope_id);
+        let merged = &graph_builder[merged_id];
+        let Some(Node::Fork(fork)) = merged else {
+            panic!("Expected merged node to be a fork");
+        };
+        assert_eq!(fork.record_miss_backtrack_idx(), None);
+        assert_eq!(fork.miss(), None);
+        let node_id = fork.lookup_table[b'a' as usize]
+            .expect("Expected fork to have a lookup table entry for 'a'");
+        let node = &graph_builder[node_id];
+        let Some(Node::Fork(fork)) = node else {
+            panic!(
+                "Expected fork to have a fork for lookup table entry at 'a', got {:?}",
+                node
+            );
+        };
+        dbg!(&graph_builder);
+        assert_eq!(fork.record_miss_backtrack_idx(), Some(variant_match_a_id));
+        assert_eq!(fork.miss(), Some(variant_match_a_id));
+        let node_id = fork.lookup_table[b'b' as usize]
+            .expect("Expected fork to have a lookup table entry for 'b'");
+        let node = &graph_builder[node_id];
+        let Some(Node::Fork(fork)) = node else {
+            panic!(
+                "Expected fork to have a fork for lookup table entry at 'b', got {:?}",
+                node
+            );
+        };
+        assert_eq!(fork.record_miss_backtrack_idx(), None);
+        assert_eq!(fork.miss(), Some(variant_match_a_id));
     }
 }

@@ -47,7 +47,7 @@ impl<'a> Iterator for Interpreter<'a> {
             dbg!(idx, current_node_id);
             match current_node {
                 Node::Fork(fork) => {
-                    if let Some(backtrack_idx) = fork.record_miss_backtrack_idx {
+                    if let Some(backtrack_idx) = fork.record_miss_backtrack_idx() {
                         self.backtrack_idxs.insert(backtrack_idx, idx);
                     }
 
@@ -62,7 +62,7 @@ impl<'a> Iterator for Interpreter<'a> {
                             idx += 1;
                         }
                         None => {
-                            if let Some(miss) = fork.miss {
+                            if let Some(miss) = fork.miss() {
                                 dbg!(miss);
                                 current_node_id = miss;
                                 current_node = &self.graph[miss];
@@ -80,7 +80,7 @@ impl<'a> Iterator for Interpreter<'a> {
                     return Some(Ok(token));
                 }
                 Node::Rope(rope) => {
-                    if let Some(backtrack_idx) = rope.record_miss_backtrack_idx {
+                    if let Some(backtrack_idx) = rope.record_miss_backtrack_idx() {
                         self.backtrack_idxs.insert(backtrack_idx, idx);
                     }
 
@@ -94,7 +94,7 @@ impl<'a> Iterator for Interpreter<'a> {
                         current_node_id = rope.then;
                         current_node = &self.graph[rope.then];
                         idx += rope.pattern.len();
-                    } else if let Some(miss) = rope.miss {
+                    } else if let Some(miss) = rope.miss() {
                         dbg!(miss);
                         current_node_id = miss;
                         current_node = &self.graph[miss];

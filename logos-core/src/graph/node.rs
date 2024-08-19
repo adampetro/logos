@@ -51,3 +51,13 @@ impl<T: VariantMatch> HasNodeIds for Node<'_, T> {
         }
     }
 }
+
+impl<'a, T: VariantMatch> Node<'a, T> {
+    pub(crate) fn miss(&self) -> Option<NodeId> {
+        match self {
+            Self::Fork(fork) => fork.miss(),
+            Self::VariantMatch(_) => None,
+            Self::Rope(rope) => rope.miss(),
+        }
+    }
+}

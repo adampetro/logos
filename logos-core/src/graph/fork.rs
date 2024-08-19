@@ -112,7 +112,9 @@ impl Fork {
                     (Some(self_id), Some(other_id)) => Some(graph_builder.merge(self_id, other_id)),
                 }
                 .map(|new_to| {
-                    if let Some(miss_fork_id) = miss_fork_id {
+                    if matches!(&graph_builder[new_to], Some(node) if node.miss() == self.miss) {
+                        new_to
+                    } else if let Some(miss_fork_id) = miss_fork_id {
                         let merge_id = graph_builder.merge(miss_fork_id, new_to);
                         match &graph_builder[merge_id] {
                             Some(Node::Fork(fork)) => fork.flatten_to_miss().unwrap_or(merge_id),

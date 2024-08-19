@@ -55,13 +55,6 @@ impl<T> Arena<T> {
             .map(|(id, value)| (NodeId(id), value))
     }
 
-    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = (NodeId, &mut T)> {
-        self.0
-            .iter_mut()
-            .enumerate()
-            .map(|(id, value)| (NodeId(id), value))
-    }
-
     pub(crate) fn iter_ids(&self) -> impl Iterator<Item = NodeId> {
         (0..self.0.len()).map(NodeId)
     }

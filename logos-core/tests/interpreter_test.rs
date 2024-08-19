@@ -103,6 +103,25 @@ fn test_logos_bug() {
 }
 
 #[test]
+fn test_logos_bug_two() {
+    let lexer = Lexer::new(vec![
+        (
+            Specification::new_loop(1, None, Specification::new_str_sequence("abc")),
+            SimpleVariantMatch::new("composite", 2),
+        ),
+        (Specification::Byte(b'a'), SimpleVariantMatch::new("a", 4)),
+    ])
+    .unwrap();
+
+    let mut interpreter = Interpreter::new(&lexer, b"abc").unwrap();
+
+    dbg!(&interpreter);
+
+    assert_eq!(Some(Ok(Token::new("a", b"a"))), interpreter.next());
+    assert_eq!(Some(Err(())), interpreter.next());
+}
+
+#[test]
 fn test_similar_tokens() {
     let lexer = Lexer::new(vec![
         (Specification::Byte(b'a'), SimpleVariantMatch::new("a", 2)),

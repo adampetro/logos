@@ -12,7 +12,6 @@ use crate::{Lexer, Specification, VariantMatch};
 use arena::Arena;
 pub use arena::NodeId;
 pub use fork::Fork;
-use itertools::Itertools;
 pub use node::Node;
 pub use rope::Rope;
 
@@ -70,8 +69,6 @@ impl<'a, T: VariantMatch> Graph<'a, T> {
             return Err(builder.errors);
         }
 
-        builder.fork_to_rope();
-
         let start_node_id = builder.shake(start_node_id);
 
         Ok(Self {
@@ -99,6 +96,7 @@ pub(crate) struct GraphBuilder<'a, T: VariantMatch> {
     merges: HashMap<MergeKey, NodeId>,
     errors: Vec<Error<'a, T>>,
     deferred_merges: Vec<DeferredMerge>,
+    max_possible_match_priority: HashMap<NodeId, usize>,
 }
 
 impl<'a, T: VariantMatch> Default for GraphBuilder<'a, T> {
@@ -108,6 +106,7 @@ impl<'a, T: VariantMatch> Default for GraphBuilder<'a, T> {
             merges: HashMap::new(),
             errors: Vec::new(),
             deferred_merges: Vec::new(),
+            max_possible_match_priority: HashMap::new(),
         }
     }
 }
@@ -410,7 +409,25 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                 });
                 merge_id
             }
-            (Some(_), Some(_)) => {
+            (Some(node_a), Some(node_b)) => {
+                match (node_a, node_b) {
+                    (Node::VariantMatch(variant_match), _) => {
+                        let priority = variant_match.priority();
+                        if priority > self.max_possible_match_priority(b) {
+                            self.set_merged(a, b, a);
+                            return a;
+                        }
+                    }
+                    (_, Node::VariantMatch(variant_match)) => {
+                        let priority = variant_match.priority();
+                        if priority > self.max_possible_match_priority(a) {
+                            self.set_merged(a, b, b);
+                            return b;
+                        }
+                    }
+                    _ => {}
+                };
+
                 let reserved = self.reserve();
                 let merge_id = reserved.0;
                 self.set_merged(a, b, merge_id);
@@ -420,15 +437,13 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     }
 
     fn merge_unchecked(&mut self, a: NodeId, b: NodeId, reserved: ReservedId) -> NodeId {
-        let (Some(node_a), Some(node_b)) = (&self.nodes[a], &self.nodes[b]) else {
+        let (Some(_), Some(_)) = (&self.nodes[a], &self.nodes[b]) else {
             panic!(
                 "Merging unchecked with one or more reserved nodes! This is a bug, please report it:\n\
                 \n\
                 https://github.com/maciejhirsz/logos/issues"
             );
         };
-
-        dbg!(a, node_a, b, node_b);
 
         let fork_a = self.fork_off(a);
         let mut fork_b = self.fork_off(b);
@@ -446,25 +461,46 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
         ReservedId(self.nodes.insert(None))
     }
 
-    fn fork_to_rope(&mut self) {
-        self.nodes.iter_mut().for_each(|(_, node)| {
-            if let Some(Node::Fork(fork)) = node {
-                if fork.lookup_table.iter().copied().flatten().unique().count() == 1 {
-                    let pattern = fork
-                        .lookup_table
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(byte, node_id)| node_id.map(|_| byte as u8))
-                        .collect();
-                    let then = fork
-                        .lookup_table
-                        .iter()
-                        .find_map(|node_id| *node_id)
-                        .unwrap();
-                    *node = Some(Rope::new(vec![pattern], then).with_fork_miss(fork).into());
-                }
-            }
-        })
+    /// returns `usize::MAX` if a reserved node is encountered
+    fn max_possible_match_priority(&mut self, node_id: NodeId) -> usize {
+        self.max_possible_match_priority
+            .get(&node_id)
+            .copied()
+            .unwrap_or_else(|| {
+                let priority =
+                    self.max_possible_match_priority_recursive(node_id, &mut HashSet::new());
+                self.max_possible_match_priority.insert(node_id, priority);
+                priority
+            })
+    }
+
+    fn max_possible_match_priority_recursive(
+        &self,
+        node_id: NodeId,
+        visited: &mut HashSet<NodeId>,
+    ) -> usize {
+        if !visited.insert(node_id) {
+            return 0;
+        }
+
+        match &self.nodes[node_id] {
+            Some(Node::Fork(fork)) => fork
+                .lookup_table
+                .iter()
+                .copied()
+                .flatten()
+                .chain(fork.miss())
+                .map(|node_id| self.max_possible_match_priority_recursive(node_id, visited))
+                .max()
+                .unwrap_or(0),
+            Some(Node::VariantMatch(variant_match)) => variant_match.priority(),
+            Some(Node::Rope(rope)) => std::iter::once(rope.then())
+                .chain(rope.miss())
+                .map(|node_id| self.max_possible_match_priority_recursive(node_id, visited))
+                .max()
+                .unwrap_or(0),
+            None => usize::MAX,
+        }
     }
 }
 
@@ -526,5 +562,36 @@ mod tests {
         };
         assert_eq!(fork.record_miss_backtrack_idx(), None);
         assert_eq!(fork.miss(), Some(variant_match_a_id));
+    }
+
+    #[test]
+    fn test_merge_loop_to_self_with_variant_match() {
+        let mut graph_builder = GraphBuilder::default();
+        let variant_match_abc_loop = SimpleVariantMatch::new("abc", 2);
+        let variant_match_abc_loop_id = graph_builder.insert(&variant_match_abc_loop);
+        let reserved = graph_builder.reserve();
+        let looping_rope_abc = Rope::new(
+            vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
+            reserved.0,
+        )
+        .with_miss(Some((variant_match_abc_loop_id, true)), &mut graph_builder);
+        let looping_rope_abc_id = graph_builder.insert_reserved(reserved, looping_rope_abc);
+        let rope_abc = Rope::new(
+            vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
+            looping_rope_abc_id,
+        );
+        let rope_abc_id = graph_builder.insert(rope_abc);
+        let variant_match_a = SimpleVariantMatch::new("a", 4);
+        let variant_match_a_id = graph_builder.insert(&variant_match_a);
+        let rope_a = Rope::new(vec![[b'a'].into()], variant_match_a_id);
+        let rope_a_id = graph_builder.insert(rope_a);
+        let merge_id = graph_builder.merge(rope_abc_id, rope_a_id);
+        let Some(Node::Fork(fork)) = &graph_builder[merge_id] else {
+            panic!("Expected merged node to be a fork");
+        };
+        let node_id = fork.lookup_table[b'a' as usize]
+            .expect("Expected fork to have a lookup table entry for 'a'");
+        dbg!(&graph_builder);
+        assert_eq!(node_id, variant_match_a_id);
     }
 }

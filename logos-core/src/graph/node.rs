@@ -1,5 +1,6 @@
 use crate::graph::{arena::HasNodeIds, Fork, NodeId, Rope};
 use crate::VariantMatch;
+use itertools::Itertools;
 
 #[derive(Debug, PartialEq)]
 pub enum Node<'a, T: VariantMatch> {
@@ -10,7 +11,22 @@ pub enum Node<'a, T: VariantMatch> {
 
 impl<T: VariantMatch> From<Fork> for Node<'_, T> {
     fn from(fork: Fork) -> Self {
-        Self::Fork(fork)
+        if fork.lookup_table.iter().copied().flatten().unique().count() == 1 {
+            let pattern = fork
+                .lookup_table
+                .iter()
+                .enumerate()
+                .filter_map(|(byte, node_id)| node_id.map(|_| byte as u8))
+                .collect();
+            let then = fork
+                .lookup_table
+                .iter()
+                .find_map(|node_id| *node_id)
+                .unwrap();
+            Self::Rope(Rope::new(vec![pattern], then).with_fork_miss(&fork))
+        } else {
+            Self::Fork(fork)
+        }
     }
 }
 

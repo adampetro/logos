@@ -16,6 +16,12 @@ pub struct Leaf<'t> {
     pub callback: Option<Callback>,
 }
 
+impl logos_core::VariantMatch for Leaf<'_> {
+    fn priority(&self) -> usize {
+        self.priority
+    }
+}
+
 #[derive(Clone)]
 pub enum Callback {
     Label(TokenStream),

@@ -96,7 +96,6 @@ pub(crate) struct GraphBuilder<'a, T: VariantMatch> {
     merges: HashMap<MergeKey, NodeId>,
     errors: Vec<Error<'a, T>>,
     deferred_merges: Vec<DeferredMerge>,
-    max_possible_match_priority: HashMap<NodeId, usize>,
 }
 
 impl<'a, T: VariantMatch> Default for GraphBuilder<'a, T> {
@@ -106,7 +105,6 @@ impl<'a, T: VariantMatch> Default for GraphBuilder<'a, T> {
             merges: HashMap::new(),
             errors: Vec::new(),
             deferred_merges: Vec::new(),
-            max_possible_match_priority: HashMap::new(),
         }
     }
 }
@@ -362,9 +360,7 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                 Some(Node::VariantMatch(variant_match_a)),
                 Some(Node::VariantMatch(variant_match_b)),
             ) => {
-                let merge_id = if variant_match_a == variant_match_b {
-                    b
-                } else if variant_match_a.priority() == variant_match_b.priority() {
+                let merge_id = if variant_match_a.priority() == variant_match_b.priority() {
                     self.errors
                         .push(Error::VariantMatchesOverlapWithSamePriority(
                             variant_match_a,
@@ -410,24 +406,6 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                 merge_id
             }
             (Some(node_a), Some(node_b)) => {
-                match (node_a, node_b) {
-                    (Node::VariantMatch(variant_match), _) => {
-                        let priority = variant_match.priority();
-                        if priority > self.max_possible_match_priority(b) {
-                            self.set_merged(a, b, a);
-                            return a;
-                        }
-                    }
-                    (_, Node::VariantMatch(variant_match)) => {
-                        let priority = variant_match.priority();
-                        if priority > self.max_possible_match_priority(a) {
-                            self.set_merged(a, b, b);
-                            return b;
-                        }
-                    }
-                    _ => {}
-                };
-
                 let reserved = self.reserve();
                 let merge_id = reserved.0;
                 self.set_merged(a, b, merge_id);
@@ -460,48 +438,6 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
     fn reserve(&mut self) -> ReservedId {
         ReservedId(self.nodes.insert(None))
     }
-
-    /// returns `usize::MAX` if a reserved node is encountered
-    fn max_possible_match_priority(&mut self, node_id: NodeId) -> usize {
-        self.max_possible_match_priority
-            .get(&node_id)
-            .copied()
-            .unwrap_or_else(|| {
-                let priority =
-                    self.max_possible_match_priority_recursive(node_id, &mut HashSet::new());
-                self.max_possible_match_priority.insert(node_id, priority);
-                priority
-            })
-    }
-
-    fn max_possible_match_priority_recursive(
-        &self,
-        node_id: NodeId,
-        visited: &mut HashSet<NodeId>,
-    ) -> usize {
-        if !visited.insert(node_id) {
-            return 0;
-        }
-
-        match &self.nodes[node_id] {
-            Some(Node::Fork(fork)) => fork
-                .lookup_table
-                .iter()
-                .copied()
-                .flatten()
-                .chain(fork.miss())
-                .map(|node_id| self.max_possible_match_priority_recursive(node_id, visited))
-                .max()
-                .unwrap_or(0),
-            Some(Node::VariantMatch(variant_match)) => variant_match.priority(),
-            Some(Node::Rope(rope)) => std::iter::once(rope.then())
-                .chain(rope.miss())
-                .map(|node_id| self.max_possible_match_priority_recursive(node_id, visited))
-                .max()
-                .unwrap_or(0),
-            None => usize::MAX,
-        }
-    }
 }
 
 impl<'a, T: VariantMatch> Index<NodeId> for GraphBuilder<'a, T> {
@@ -516,6 +452,7 @@ impl<'a, T: VariantMatch> Index<NodeId> for GraphBuilder<'a, T> {
 mod tests {
     use super::{Fork, GraphBuilder, Node, Rope};
     use crate::SimpleVariantMatch;
+    use std::collections::HashSet;
 
     #[test]
     fn test_record_miss_backtrack_idx_properly_propagated_on_fork_rope_merge() {
@@ -534,64 +471,90 @@ mod tests {
         let rope_id = graph_builder.insert(rope);
         let merged_id = graph_builder.merge(fork_id, rope_id);
         let merged = &graph_builder[merged_id];
-        let Some(Node::Fork(fork)) = merged else {
-            panic!("Expected merged node to be a fork");
+        let Some(Node::Rope(rope)) = merged else {
+            panic!("Expected merged node to be a rope, got {:?}", merged);
         };
-        assert_eq!(fork.record_miss_backtrack_idx(), None);
-        assert_eq!(fork.miss(), None);
-        let node_id = fork.lookup_table[b'a' as usize]
-            .expect("Expected fork to have a lookup table entry for 'a'");
+        assert_eq!(rope.record_miss_backtrack_idx(), None);
+        assert_eq!(rope.miss(), None);
+        assert_eq!(rope.pattern(), vec![HashSet::from([b'a'])]);
+        let node_id = rope.then();
         let node = &graph_builder[node_id];
-        let Some(Node::Fork(fork)) = node else {
-            panic!(
-                "Expected fork to have a fork for lookup table entry at 'a', got {:?}",
-                node
-            );
+        let Some(Node::Rope(rope)) = node else {
+            panic!("Expected rope to go to another rope, got {:?}", node);
         };
         dbg!(&graph_builder);
-        assert_eq!(fork.record_miss_backtrack_idx(), Some(variant_match_a_id));
-        assert_eq!(fork.miss(), Some(variant_match_a_id));
-        let node_id = fork.lookup_table[b'b' as usize]
-            .expect("Expected fork to have a lookup table entry for 'b'");
+        assert_eq!(rope.record_miss_backtrack_idx(), Some(variant_match_a_id));
+        assert_eq!(rope.miss(), Some(variant_match_a_id));
+        assert_eq!(rope.pattern(), vec![HashSet::from([b'b'])]);
+        let node_id = rope.then();
         let node = &graph_builder[node_id];
-        let Some(Node::Fork(fork)) = node else {
-            panic!(
-                "Expected fork to have a fork for lookup table entry at 'b', got {:?}",
-                node
-            );
+        let Some(Node::Rope(rope)) = node else {
+            panic!("Expected rope to go to another rope, got {:?}", node);
         };
-        assert_eq!(fork.record_miss_backtrack_idx(), None);
-        assert_eq!(fork.miss(), Some(variant_match_a_id));
+        assert_eq!(rope.record_miss_backtrack_idx(), None);
+        assert_eq!(rope.miss(), Some(variant_match_a_id));
     }
 
     #[test]
-    fn test_merge_loop_to_self_with_variant_match() {
+    fn test_longer_match_lower_priority() {
         let mut graph_builder = GraphBuilder::default();
-        let variant_match_abc_loop = SimpleVariantMatch::new("abc", 2);
-        let variant_match_abc_loop_id = graph_builder.insert(&variant_match_abc_loop);
-        let reserved = graph_builder.reserve();
-        let looping_rope_abc = Rope::new(
-            vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
-            reserved.0,
+        let variant_match_abc = SimpleVariantMatch::new("abc", 6);
+        let variant_match_abc_id = graph_builder.insert(&variant_match_abc);
+        let rope_def = Rope::new(
+            vec![[b'd'].into(), [b'e'].into(), [b'f'].into()],
+            variant_match_abc_id,
         )
-        .with_miss(Some((variant_match_abc_loop_id, true)), &mut graph_builder);
-        let looping_rope_abc_id = graph_builder.insert_reserved(reserved, looping_rope_abc);
+        .with_miss(Some((variant_match_abc_id, true)), &mut graph_builder);
+        let rope_def_id = graph_builder.insert(rope_def);
         let rope_abc = Rope::new(
             vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
-            looping_rope_abc_id,
+            rope_def_id,
         );
         let rope_abc_id = graph_builder.insert(rope_abc);
-        let variant_match_a = SimpleVariantMatch::new("a", 4);
-        let variant_match_a_id = graph_builder.insert(&variant_match_a);
-        let rope_a = Rope::new(vec![[b'a'].into()], variant_match_a_id);
-        let rope_a_id = graph_builder.insert(rope_a);
-        let merge_id = graph_builder.merge(rope_abc_id, rope_a_id);
-        let Some(Node::Fork(fork)) = &graph_builder[merge_id] else {
-            panic!("Expected merged node to be a fork");
+        let variant_match_word = SimpleVariantMatch::new("word", 2);
+        let variant_match_word_id = graph_builder.insert(&variant_match_word);
+        let text_rope_reserved_id = graph_builder.reserve();
+        let text_rope = Rope::new(
+            vec![(b'a'..=b'z').collect::<HashSet<_>>()],
+            text_rope_reserved_id.0,
+        )
+        .with_miss(Some((variant_match_word_id, true)), &mut graph_builder);
+        let text_rope_id = graph_builder.insert_reserved(text_rope_reserved_id, text_rope);
+        let text_start_rope = Rope::new(vec![(b'a'..=b'z').collect::<HashSet<_>>()], text_rope_id);
+        let text_start_rope_id = graph_builder.insert(text_start_rope);
+        let merge_id = graph_builder.merge(rope_abc_id, text_start_rope_id);
+        let node = &graph_builder[merge_id];
+        let Some(Node::Fork(fork)) = node else {
+            panic!("Expected merged node to be a fork, got {:?}", node);
         };
-        let node_id = fork.lookup_table[b'a' as usize]
-            .expect("Expected fork to have a lookup table entry for 'a'");
+        let node_id = fork.lookup_table[b'a' as usize].unwrap();
+        let node = &graph_builder[node_id];
+        let Some(Node::Fork(fork)) = node else {
+            panic!("Expected merged node to be a fork, got {:?}", node);
+        };
+        assert_eq!(fork.miss(), Some(variant_match_word_id));
+        assert_eq!(fork.record_miss_backtrack_idx(), Some(variant_match_word_id));
+        let node_id = fork.lookup_table[b'b' as usize].unwrap();
+        let node = &graph_builder[node_id];
+        let Some(Node::Fork(fork)) = node else {
+            panic!("Expected merged node to be a fork, got {:?}", node);
+        };
+        assert_eq!(fork.miss(), Some(variant_match_word_id));
+        assert_eq!(fork.record_miss_backtrack_idx(), Some(variant_match_word_id));
+        let node_id = fork.lookup_table[b'c' as usize].unwrap();
+        let node = &graph_builder[node_id];
+        let Some(Node::Fork(fork)) = node else {
+            panic!("Expected merged node to be a fork, got {:?}", node);
+        };
+        assert_eq!(fork.miss(), Some(variant_match_abc_id));
+        assert_eq!(fork.record_miss_backtrack_idx(), Some(variant_match_abc_id));
+        let node_id = fork.lookup_table[b'd' as usize].unwrap();
+        let node = &graph_builder[node_id];
+        let Some(Node::Fork(fork)) = node else {
+            panic!("Expected merged node to be a fork, got {:?}", node);
+        };
         dbg!(&graph_builder);
-        assert_eq!(node_id, variant_match_a_id);
+        assert_eq!(fork.miss(), Some(variant_match_word_id));
+        assert_eq!(fork.record_miss_backtrack_idx(), Some(variant_match_word_id));
     }
 }

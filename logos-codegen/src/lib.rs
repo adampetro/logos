@@ -10,6 +10,7 @@
 
 mod error;
 mod generator;
+mod generator_next;
 mod graph;
 mod leaf;
 mod mir;
@@ -27,6 +28,7 @@ use parser::{IgnoreFlags, Mode, Parser};
 use quote::ToTokens;
 use util::MaybeVoid;
 
+use logos_core::{Lexer, Specification};
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use quote::quote;
 use syn::parse_quote;
@@ -56,20 +58,20 @@ pub fn generate(input: TokenStream) -> TokenStream {
         parser.try_parse_logos(attr);
     }
 
-    let mut ropes = Vec::new();
-    let mut regex_ids = Vec::new();
-    let mut graph = Graph::new();
+    // let mut ropes = Vec::new();
+    // let mut regex_ids = Vec::new();
+    // let mut graph = Graph::new();
+    let mut variant_matches = Vec::new();
 
     {
         let errors = &mut parser.errors;
 
         for literal in &parser.skips {
-            match literal.to_mir(&parser.subpatterns, IgnoreFlags::Empty, errors) {
-                Ok(mir) => {
-                    let then = graph.push(Leaf::new_skip(literal.span()).priority(mir.priority()));
-                    let id = graph.regex(mir, then);
-
-                    regex_ids.push(id);
+            match literal.to_specification(&parser.subpatterns, IgnoreFlags::Empty, errors) {
+                Ok(specification) => {
+                    let leaf =
+                        Leaf::new_skip(literal.span()).priority(specification.default_priority());
+                    variant_matches.push((specification, leaf));
                 }
                 Err(err) => {
                     errors.err(err, literal.span());
@@ -143,33 +145,43 @@ pub fn generate(input: TokenStream) -> TokenStream {
                     };
 
                     if definition.ignore_flags.is_empty() {
-                        let bytes = definition.literal.to_bytes();
-                        let then = graph.push(
-                            leaf(definition.literal.span())
-                                .priority(definition.priority.unwrap_or(bytes.len() * 2))
-                                .callback(definition.callback),
+                        let specification = Specification::new_sequence(
+                            definition
+                                .literal
+                                .to_bytes()
+                                .into_iter()
+                                .map(Specification::Byte)
+                                .collect(),
                         );
 
-                        ropes.push(Rope::new(bytes, then));
+                        let variant_match = leaf(definition.literal.span())
+                            .priority(
+                                definition
+                                    .priority
+                                    .unwrap_or_else(|| specification.default_priority()),
+                            )
+                            .callback(definition.callback);
+
+                        variant_matches.push((specification, variant_match));
                     } else {
-                        let mir = definition
+                        let specification = definition
                             .literal
                             .escape_regex()
-                            .to_mir(
+                            .to_specification(
                                 &Default::default(),
                                 definition.ignore_flags,
                                 &mut parser.errors,
                             )
                             .expect("The literal should be perfectly valid regex");
 
-                        let then = graph.push(
-                            leaf(definition.literal.span())
-                                .priority(definition.priority.unwrap_or_else(|| mir.priority()))
-                                .callback(definition.callback),
-                        );
-                        let id = graph.regex(mir, then);
-
-                        regex_ids.push(id);
+                        let variant_match = leaf(definition.literal.span())
+                            .priority(
+                                definition
+                                    .priority
+                                    .unwrap_or_else(|| specification.default_priority()),
+                            )
+                            .callback(definition.callback);
+                        variant_matches.push((specification, variant_match));
                     }
                 }
                 REGEX_ATTR => {
@@ -180,33 +192,33 @@ pub fn generate(input: TokenStream) -> TokenStream {
                             continue;
                         }
                     };
-                    let mir = match definition.literal.to_mir(
+                    let specification = match definition.literal.to_specification(
                         &parser.subpatterns,
                         definition.ignore_flags,
                         &mut parser.errors,
                     ) {
-                        Ok(mir) => mir,
+                        Ok(specification) => specification,
                         Err(err) => {
                             parser.err(err, definition.literal.span());
                             continue;
                         }
                     };
 
-                    let then = graph.push(
-                        leaf(definition.literal.span())
-                            .priority(definition.priority.unwrap_or_else(|| mir.priority()))
-                            .callback(definition.callback),
-                    );
-                    let id = graph.regex(mir, then);
-
-                    regex_ids.push(id);
+                    let variant_match = leaf(definition.literal.span())
+                        .priority(
+                            definition
+                                .priority
+                                .unwrap_or_else(|| specification.default_priority()),
+                        )
+                        .callback(definition.callback);
+                    variant_matches.push((specification, variant_match));
                 }
                 _ => (),
             }
         }
     }
 
-    let mut root = Fork::new();
+    // let mut root = Fork::new();
 
     debug!("Parsing additional options (extras, source, ...)");
 
@@ -237,85 +249,109 @@ pub fn generate(input: TokenStream) -> TokenStream {
 
                 type Source = #source;
 
-                fn lex(lex: &mut #logos_path::Lexer<'s, Self>) {
+                fn lex(lexer: &mut #logos_path::Lexer<'s, Self>) -> Option<Result<Self, Self::Error>> {
                     #body
                 }
             }
         }
     };
 
-    for id in regex_ids {
-        let fork = graph.fork_off(id);
+    // for id in regex_ids {
+    //     let fork = graph.fork_off(id);
 
-        root.merge(fork, &mut graph);
-    }
-    for rope in ropes {
-        root.merge(rope.into_fork(&mut graph), &mut graph);
-    }
-    while let Some(id) = root.miss.take() {
-        let fork = graph.fork_off(id);
+    //     root.merge(fork, &mut graph);
+    // }
+    // for rope in ropes {
+    //     root.merge(rope.into_fork(&mut graph), &mut graph);
+    // }
+    // while let Some(id) = root.miss.take() {
+    //     let fork = graph.fork_off(id);
 
-        if fork.branches().next().is_some() {
-            root.merge(fork, &mut graph);
-        } else {
-            break;
-        }
-    }
+    //     if fork.branches().next().is_some() {
+    //         root.merge(fork, &mut graph);
+    //     } else {
+    //         break;
+    //     }
+    // }
+
+    // TODO: don't have this return a result
+    let lexer = Lexer::new(variant_matches).unwrap();
 
     debug!("Checking if any two tokens have the same priority");
 
-    for &DisambiguationError(a, b) in graph.errors() {
-        let a = graph[a].unwrap_leaf();
-        let b = graph[b].unwrap_leaf();
-        let disambiguate = a.priority + 1;
+    let new_graph = match logos_core::graph::Graph::for_lexer(&lexer) {
+        Ok(graph) => Some(graph),
+        Err(errors) => {
+            errors.iter().for_each(
+                |logos_core::graph::Error::VariantMatchesOverlapWithSamePriority(a, b)| {
+                    let disambiguate = a.priority + 1;
 
-        let mut err = |a: &Leaf, b: &Leaf| {
-            parser.err(
-                format!(
-                    "\
-                    A definition of variant `{a}` can match the same input as another definition of variant `{b}`.\n\
-                    \n\
-                    hint: Consider giving one definition a higher priority: \
-                    #[regex(..., priority = {disambiguate})]\
-                    ",
-                ),
-                a.span
+                    let mut err = |a: &Leaf, b: &Leaf| {
+                        parser.err(
+                            format!(
+                                "\
+                                A definition of variant `{a}` can match the same input as another definition of variant `{b}`.\n\
+                                \n\
+                                hint: Consider giving one definition a higher priority: \
+                                #[regex(..., priority = {disambiguate})]\
+                                ",
+                            ),
+                            a.span
+                        );
+                    };
+
+                    err(a, b);
+                    err(b, a);
+                },
             );
-        };
 
-        err(a, b);
-        err(b, a);
-    }
+            None
+        }
+    };
+
+    // for &DisambiguationError(a, b) in graph.errors() {
+    //     let a = graph[a].unwrap_leaf();
+    //     let b = graph[b].unwrap_leaf();
+    //     let disambiguate = a.priority + 1;
+
+    //     let mut err = |a: &Leaf, b: &Leaf| {
+    //         parser.err(
+    //             format!(
+    //                 "\
+    //                 A definition of variant `{a}` can match the same input as another definition of variant `{b}`.\n\
+    //                 \n\
+    //                 hint: Consider giving one definition a higher priority: \
+    //                 #[regex(..., priority = {disambiguate})]\
+    //                 ",
+    //             ),
+    //             a.span
+    //         );
+    //     };
+
+    //     err(a, b);
+    //     err(b, a);
+    // }
 
     if let Some(errors) = parser.errors.render() {
         return impl_logos(errors);
     }
 
-    let root = graph.push(root);
+    let graph = new_graph.expect("Graph should be generated");
 
-    graph.shake(root);
+    // let root = graph.push(root);
+
+    // graph.shake(root);
 
     debug!("Generating code from graph:\n{graph:#?}");
 
-    let generator = Generator::new(name, &this, root, &graph);
+    let body = generator_next::Generator::generate(name, &this, &graph);
 
-    let body = generator.generate();
     impl_logos(quote! {
         use #logos_path::internal::{LexerInternal, CallbackResult};
 
         type Lexer<'s> = #logos_path::Lexer<'s, #this>;
 
-        fn _end<'s>(lex: &mut Lexer<'s>) {
-            lex.end()
-        }
-
-        fn _error<'s>(lex: &mut Lexer<'s>) {
-            lex.bump_unchecked(1);
-
-            lex.error();
-        }
-
-        #body
+        #(#body)*
     })
 }
 

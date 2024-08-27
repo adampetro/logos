@@ -1,12 +1,13 @@
 mod any;
 mod r#loop;
+mod regex;
 mod sequence;
 
 pub use any::Any;
 pub use r#loop::Loop;
 pub use sequence::Sequence;
 
-#[derive(enum_as_inner::EnumAsInner, PartialEq)]
+#[derive(enum_as_inner::EnumAsInner, PartialEq, Clone)]
 pub enum Specification {
     Sequence(Sequence),
     Any(Any),
@@ -53,6 +54,10 @@ impl Specification {
         } else {
             Self::Sequence(Sequence::new_str_sequence(s))
         }
+    }
+
+    pub fn new_char(c: char) -> Self {
+        Self::new_str_sequence(&c.to_string())
     }
 
     pub fn new_sequence(specifications: Vec<Self>) -> Self {
@@ -109,6 +114,15 @@ mod tests {
             ]),
             Specification::maybe(Specification::new_str_sequence("bar")),
         ]);
+        assert_eq!(specification.default_priority(), 6);
+
+        let specification = Specification::utf8("byte|bytes[1-9][0-9]?").unwrap();
+        assert_eq!(specification.default_priority(), 8);
+
+        let specification = Specification::utf8("[a-zA-Z$_][a-zA-Z0-9$_]*").unwrap();
+        assert_eq!(specification.default_priority(), 2);
+
+        let specification = Specification::utf8("(abc)+(def|xyz)?").unwrap();
         assert_eq!(specification.default_priority(), 6);
     }
 }

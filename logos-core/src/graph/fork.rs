@@ -82,20 +82,20 @@ impl Fork {
         other: Fork,
         graph_builder: &mut GraphBuilder<T>,
     ) {
-        self.miss = match (self.miss, other.miss) {
-            (Some(self_miss), Some(other_miss)) => Some(graph_builder.merge(self_miss, other_miss)),
-            (None, Some(other_miss)) => Some(other_miss),
-            (self_miss, None) => self_miss,
-        };
-        self.record_miss_backtrack_idx = match (
-            self.record_miss_backtrack_idx,
-            other.record_miss_backtrack_idx,
-        ) {
-            (Some(self_node_id), Some(other_node_id)) => {
-                Some(graph_builder.merge(self_node_id, other_node_id))
-            }
-            (None, Some(other_node_id)) => Some(other_node_id),
-            (self_node_id, None) => self_node_id,
+        (self.miss, self.record_miss_backtrack_idx) = match (self.miss, other.miss) {
+            (Some(self_miss), Some(other_miss)) => {
+                match (self.record_miss_backtrack_idx, other.record_miss_backtrack_idx) {
+                    (Some(self_record_miss_backtrack_idx), Some(other_record_miss_backtrack_idx)) => (
+                        Some(graph_builder.merge(self_miss, other_miss)),
+                        Some(graph_builder.merge(self_record_miss_backtrack_idx, other_record_miss_backtrack_idx)),
+                    ),
+                    (Some(self_record_miss_backtrack_idx), None) => (Some(self_miss), Some(self_record_miss_backtrack_idx)),
+                    (None, Some(other_record_miss_backtrack_idx)) => (Some(other_miss), Some(other_record_miss_backtrack_idx)),
+                    (None, None) => (Some(graph_builder.merge(self_miss, other_miss)), None),
+                }
+            },
+            (None, Some(other_miss)) => (Some(other_miss), other.record_miss_backtrack_idx),
+            (self_miss, None) => (self_miss, self.record_miss_backtrack_idx),
         };
         let miss_fork_id = self.miss.map(|miss| {
             let miss_fork = Fork::new().with_miss(Some((miss, false)), graph_builder);

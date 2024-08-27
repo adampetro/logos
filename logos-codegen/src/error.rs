@@ -99,6 +99,12 @@ impl From<Error> for Cow<'static, str> {
     }
 }
 
+impl From<Cow<'static, str>> for Error {
+    fn from(err: Cow<'static, str>) -> Self {
+        Error(err)
+    }
+}
+
 impl ToTokens for SpannedError {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let message = &*self.message;

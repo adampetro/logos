@@ -103,25 +103,6 @@ fn test_logos_bug() {
 }
 
 #[test]
-fn test_logos_bug_two() {
-    let lexer = Lexer::new(vec![
-        (
-            Specification::new_loop(1, None, Specification::new_str_sequence("abc")),
-            SimpleVariantMatch::new("composite", 2),
-        ),
-        (Specification::Byte(b'a'), SimpleVariantMatch::new("a", 4)),
-    ])
-    .unwrap();
-
-    let mut interpreter = Interpreter::new(&lexer, b"abc").unwrap();
-
-    dbg!(&interpreter);
-
-    assert_eq!(Some(Ok(Token::new("a", b"a"))), interpreter.next());
-    assert_eq!(Some(Err(())), interpreter.next());
-}
-
-#[test]
 fn test_similar_tokens() {
     let lexer = Lexer::new(vec![
         (Specification::Byte(b'a'), SimpleVariantMatch::new("a", 2)),
@@ -295,6 +276,65 @@ fn test_json() {
             Token::new("null", b"null"),
             Token::new("number", b"3.14159e0"),
             Token::new("string", b"\"string\""),
+        ]),
+    );
+}
+
+#[test]
+fn test_longer_match_lower_priority() {
+    let lexer = Lexer::new(vec![
+        (
+            Specification::utf8("[a-z]+").unwrap(),
+            SimpleVariantMatch::new("word", 2),
+        ),
+        (
+            Specification::utf8("(abc)(def)?").unwrap(),
+            SimpleVariantMatch::new("abc", 6),
+        ),
+    ])
+    .unwrap();
+
+    let interpreter = Interpreter::new(&lexer, b"abcd").unwrap();
+
+    dbg!(&interpreter);
+
+    assert_eq!(
+        interpreter.collect::<Result<Vec<Token>, ()>>(),
+        Ok(vec![Token::new("word", b"abcd")]),
+    );
+}
+
+#[test]
+fn test_overlap() {
+    let lexer = Lexer::new(vec![
+        (
+            Specification::Byte(b'.'),
+            SimpleVariantMatch::new("accessor", 2),
+        ),
+        (
+            Specification::new_str_sequence("..."),
+            SimpleVariantMatch::new("ellipsis", 6),
+        ),
+        (
+            Specification::Byte(b' '),
+            SimpleVariantMatch::new("whitespace", 2),
+        ),
+    ])
+    .unwrap();
+
+    let interpreter = Interpreter::new(&lexer, b". .. ...").unwrap();
+
+    dbg!(&interpreter);
+
+    assert_eq!(
+        interpreter.collect::<Result<Vec<Token>, ()>>(),
+        Ok(vec![
+            Token::new("accessor", b"."),
+            Token::new("whitespace", b" "),
+            Token::new("accessor", b"."),
+            Token::new("accessor", b"."),
+            Token::new("whitespace", b" "),
+            Token::new("ellipsis", b"..."),
         ]),
     );
 }

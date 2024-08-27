@@ -2,11 +2,23 @@ use crate::graph::{arena::HasNodeIds, Fork, NodeId, Rope};
 use crate::VariantMatch;
 use itertools::Itertools;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Node<'a, T: VariantMatch> {
     Fork(Fork),
     VariantMatch(&'a T),
     Rope(Rope),
+}
+
+/// assume variant match is only put in the graph once,
+/// this allows us to not require `PartialEq` on `T`
+impl<T: VariantMatch> PartialEq for Node<'_, T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Fork(fork), Self::Fork(other_fork)) => fork == other_fork,
+            (Self::Rope(rope), Self::Rope(other_rope)) => rope == other_rope,
+            _ => false,
+        }
+    }
 }
 
 impl<T: VariantMatch> From<Fork> for Node<'_, T> {
@@ -53,11 +65,19 @@ impl<T: VariantMatch> HasNodeIds for Node<'_, T> {
 }
 
 impl<'a, T: VariantMatch> Node<'a, T> {
-    pub(crate) fn miss(&self) -> Option<NodeId> {
+    pub fn miss(&self) -> Option<NodeId> {
         match self {
             Self::Fork(fork) => fork.miss(),
             Self::VariantMatch(_) => None,
             Self::Rope(rope) => rope.miss(),
+        }
+    }
+
+    pub fn record_miss_backtrack_idx(&self) -> Option<NodeId> {
+        match self {
+            Self::Fork(fork) => fork.record_miss_backtrack_idx(),
+            Self::VariantMatch(_) => None,
+            Self::Rope(rope) => rope.record_miss_backtrack_idx(),
         }
     }
 }

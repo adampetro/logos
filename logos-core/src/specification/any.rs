@@ -1,6 +1,6 @@
 use crate::Specification;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct Any {
     specifications: Vec<Specification>,
 }
@@ -14,7 +14,7 @@ impl Any {
             .unwrap_or(0)
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Specification> {
+    pub fn iter(&self) -> impl Iterator<Item = &Specification> {
         self.specifications.iter()
     }
 

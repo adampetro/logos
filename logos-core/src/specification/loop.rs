@@ -1,6 +1,6 @@
 use crate::Specification;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct Loop {
     min: usize,
     max: Option<usize>,
@@ -20,15 +20,15 @@ impl Loop {
         }
     }
 
-    pub(crate) fn min(&self) -> usize {
+    pub fn min(&self) -> usize {
         self.min
     }
 
-    pub(crate) fn max(&self) -> Option<usize> {
+    pub fn max(&self) -> Option<usize> {
         self.max
     }
 
-    pub(crate) fn specification(&self) -> &Specification {
+    pub fn specification(&self) -> &Specification {
         &self.specification
     }
 }

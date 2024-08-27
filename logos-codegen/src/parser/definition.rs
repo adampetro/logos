@@ -1,9 +1,9 @@
+use logos_core::Specification;
 use proc_macro2::{Ident, Span};
 use syn::{spanned::Spanned, LitByteStr, LitStr};
 
 use crate::error::{Errors, Result};
 use crate::leaf::Callback;
-use crate::mir::Mir;
 use crate::parser::nested::NestedValue;
 use crate::parser::{IgnoreFlags, Parser, Subpatterns};
 
@@ -115,30 +115,30 @@ impl Literal {
         }
     }
 
-    pub fn to_mir(
+    pub fn to_specification(
         &self,
         subpatterns: &Subpatterns,
         ignore_flags: IgnoreFlags,
         errors: &mut Errors,
-    ) -> Result<Mir> {
+    ) -> Result<Specification> {
         let value = subpatterns.fix(self, errors);
 
         if ignore_flags.contains(IgnoreFlags::IgnoreAsciiCase) {
             match self {
-                Literal::Utf8(_) => {
-                    Mir::utf8(&value).map(MakeAsciiCaseInsensitive::make_ascii_case_insensitive)
-                }
-                Literal::Bytes(_) => Mir::binary_ignore_case(&value),
+                Literal::Utf8(_) => Specification::utf8(&value)
+                    .map_err(Into::into)
+                    .map(MakeAsciiCaseInsensitive::make_ascii_case_insensitive),
+                Literal::Bytes(_) => Specification::binary_ignore_case(&value).map_err(Into::into),
             }
         } else if ignore_flags.contains(IgnoreFlags::IgnoreCase) {
             match self {
-                Literal::Utf8(_) => Mir::utf8_ignore_case(&value),
-                Literal::Bytes(_) => Mir::binary_ignore_case(&value),
+                Literal::Utf8(_) => Specification::utf8_ignore_case(&value).map_err(Into::into),
+                Literal::Bytes(_) => Specification::binary_ignore_case(&value).map_err(Into::into),
             }
         } else {
             match self {
-                Literal::Utf8(_) => Mir::utf8(&value),
-                Literal::Bytes(_) => Mir::binary(&value),
+                Literal::Utf8(_) => Specification::utf8(&value).map_err(Into::into),
+                Literal::Bytes(_) => Specification::binary(&value).map_err(Into::into),
             }
         }
     }

@@ -210,13 +210,7 @@ where
     fn next(&mut self) -> Option<Result<Token, Token::Error>> {
         self.token_start = self.token_end;
 
-        Token::lex(self);
-
-        // This basically treats self.token as a temporary field.
-        // Since we always immediately return a newly set token here,
-        // we don't have to replace it with `None` or manually drop
-        // it later.
-        unsafe { ManuallyDrop::take(&mut self.token) }
+        Token::lex(self)
     }
 }
 
@@ -328,6 +322,21 @@ where
         );
 
         self.token_end += size;
+    }
+
+    #[inline]
+    fn current_end(&self) -> usize {
+        self.token_end
+    }
+
+    #[inline]
+    fn set_end_unchecked(&mut self, end: usize) {
+        debug_assert!(
+            end <= self.source.len() && end >= self.token_start,
+            "Setting end out of bounds!"
+        );
+
+        self.token_end = end;
     }
 
     /// Reset `token_start` to `token_end`.

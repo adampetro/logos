@@ -1,4 +1,4 @@
-pub trait VariantMatch: std::fmt::Debug + PartialEq {
+pub trait VariantMatch: std::fmt::Debug {
     fn priority(&self) -> usize;
 }
 

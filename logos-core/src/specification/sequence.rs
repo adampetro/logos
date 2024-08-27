@@ -1,6 +1,6 @@
 use crate::Specification;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct Sequence {
     specifications: Vec<Specification>,
 }
@@ -23,7 +23,7 @@ impl Sequence {
         }
     }
 
-    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &Specification> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Specification> {
         self.specifications.iter()
     }
 

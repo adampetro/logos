@@ -109,10 +109,17 @@ impl Fork {
                     (None, None) => None,
                     (Some(id), None) => Some(id),
                     (None, Some(id)) => Some(id),
-                    (Some(self_id), Some(other_id)) => Some(graph_builder.merge(self_id, other_id)),
+                    (Some(other_id), Some(self_id)) => Some(graph_builder.merge(other_id, self_id)),
                 }
                 .map(|new_to| {
-                    if matches!(&graph_builder[new_to], Some(node) if node.miss() == self.miss) {
+                    let node_has_miss = |node_id: NodeId| matches!(&graph_builder[node_id], Some(node) if node.miss() == self.miss);
+                    let miss_already_merged = node_has_miss(new_to) ||
+                        matches!(
+                            &graph_builder[new_to],
+                            None if matches!(*other_to, Some(node_id) if node_has_miss(node_id)) || matches!(*to, Some(node_id) if node_has_miss(node_id))
+                        );
+
+                    if miss_already_merged {
                         new_to
                     } else if let Some(miss_fork_id) = miss_fork_id {
                         let merge_id = graph_builder.merge(miss_fork_id, new_to);

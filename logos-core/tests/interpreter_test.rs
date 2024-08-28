@@ -338,3 +338,57 @@ fn test_overlap() {
         ]),
     );
 }
+
+#[test]
+fn test_infinite_loop_overlap() {
+    let lexer = Lexer::new(vec![
+        (
+            Specification::new_loop(
+                1,
+                None,
+                Specification::new_str_sequence("abc")
+            ),
+            SimpleVariantMatch::new("abc", 6),
+        ),
+        (
+            Specification::new_sequence(vec![
+                Specification::new_loop(
+                    1,
+                    None,
+                    Specification::new_str_sequence("abc")
+                ),
+                Specification::new_str_sequence("d"),
+            ]),
+            SimpleVariantMatch::new("abcd", 8),
+        ),
+    ])
+    .unwrap();
+
+    let interpreter = Interpreter::new(&lexer, b"abcabcd").unwrap();
+
+    dbg!(&interpreter);
+
+    assert_eq!(
+        interpreter.collect::<Result<Vec<Token>, ()>>(),
+        Ok(vec![Token::new("abcd", b"abcabcd")]),
+    );
+}
+
+#[test]
+fn test_css() {
+    let lexer = Lexer::new(vec![
+        (
+            Specification::utf8("[+-]?[0-9]*[.]?[0-9]+(?:[eE][+-]?[0-9]+)?").unwrap(),
+            SimpleVariantMatch::new("number", 2),
+        )
+    ]).unwrap();
+
+    let interpreter = Interpreter::new(&lexer, b"3.14159").unwrap();
+
+    dbg!(&interpreter);
+
+    assert_eq!(
+        interpreter.collect::<Result<Vec<Token>, ()>>(),
+        Ok(vec![Token::new("number", b"3.14159")]),
+    );
+}

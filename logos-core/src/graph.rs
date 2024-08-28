@@ -405,7 +405,7 @@ impl<'a, T: VariantMatch> GraphBuilder<'a, T> {
                 });
                 merge_id
             }
-            (Some(node_a), Some(node_b)) => {
+            (Some(_), Some(_)) => {
                 let reserved = self.reserve();
                 let merge_id = reserved.0;
                 self.set_merged(a, b, merge_id);
@@ -556,5 +556,39 @@ mod tests {
         dbg!(&graph_builder);
         assert_eq!(fork.miss(), Some(variant_match_word_id));
         assert_eq!(fork.record_miss_backtrack_idx(), Some(variant_match_word_id));
+    }
+
+    #[test]
+    fn test_overlapping_infinite_loops() {
+        let mut graph_builder = GraphBuilder::default();
+        let variant_match_abc = SimpleVariantMatch::new("abc", 6);
+        let variant_match_abc_id = graph_builder.insert(&variant_match_abc);
+        let rope_abc_reserved_id = graph_builder.reserve();
+        let rope_abc = Rope::new(
+            vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
+            rope_abc_reserved_id.0,
+        ).with_miss(Some((variant_match_abc_id, true)), &mut graph_builder);
+        let rope_abc_id = graph_builder.insert_reserved(rope_abc_reserved_id, rope_abc);
+        let rope_abc_start = Rope::new(
+            vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
+            rope_abc_id,
+        );
+        let rope_abc_start_id = graph_builder.insert(rope_abc_start);
+        let variant_match_abcd = SimpleVariantMatch::new("abcd", 8);
+        let variant_match_abcd_id = graph_builder.insert(&variant_match_abcd);
+        let rope_d = Rope::new(vec![[b'd'].into()], variant_match_abcd_id);
+        let rope_d_id = graph_builder.insert(rope_d);
+        let rope_abcd_loop_reserved_id = graph_builder.reserve();
+        let rope_abcd_loop = Rope::new(
+            vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
+            rope_abcd_loop_reserved_id.0,
+        ).with_miss(Some((variant_match_abcd_id, true)), &mut graph_builder);
+        let rope_abcd_loop_id = graph_builder.insert_reserved(rope_abcd_loop_reserved_id, rope_abcd_loop);
+        let rope_abcd_start = Rope::new(
+            vec![[b'a'].into(), [b'b'].into(), [b'c'].into()],
+            rope_abcd_loop_id,
+        );
+        let rope_abcd_start_id = graph_builder.insert(rope_abcd_start);
+        let merge_id = graph_builder.merge(rope_abc_start_id, rope_abcd_start_id);
     }
 }
